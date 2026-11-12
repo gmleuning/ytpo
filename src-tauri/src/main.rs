@@ -1,6 +1,7 @@
 // Typo — minimal local-first font browser (Tauri shell around the ui/ folder).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod archive;
 mod edit;
 mod scan;
 mod sfnt;
@@ -22,9 +23,9 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Res<T> + Send + 'static
 }
 
 #[tauri::command]
-async fn scan_fonts(app: tauri::AppHandle, folders: Vec<String>, files: Vec<String>, installed: bool) -> Res<scan::ScanResult> {
-    let cache = data_dir(&app)?.join("scan-cache.json");
-    blocking(move || Ok(scan::scan(&folders, &files, installed, &cache))).await
+async fn scan_fonts(app: tauri::AppHandle, folders: Vec<String>, files: Vec<String>, installed: bool, archive: Option<String>) -> Res<scan::ScanResult> {
+    let cache = data_dir(&app)?.join("scan-cache-v2.json");
+    blocking(move || Ok(scan::scan(&folders, &files, installed, archive.as_deref(), &cache))).await
 }
 
 #[tauri::command]
@@ -39,6 +40,19 @@ struct Renamed { path: String, notes: Vec<String> }
 #[tauri::command]
 async fn rename_file(path: String, new_name: String) -> Res<Renamed> {
     blocking(move || edit::rename_file(Path::new(&path), &new_name).map(|(path, notes)| Renamed { path, notes })).await
+}
+
+#[derive(Serialize)]
+struct Archived { path: String, notes: Vec<String> }
+
+#[tauri::command]
+async fn archive_font(path: String, source: String, archive_dir: String) -> Res<Archived> {
+    blocking(move || archive::archive(Path::new(&path), &source, Path::new(&archive_dir)).map(|(path, notes)| Archived { path, notes })).await
+}
+
+#[tauri::command]
+async fn install_font(path: String) -> Res<Vec<String>> {
+    blocking(move || archive::install(Path::new(&path))).await
 }
 
 #[derive(Serialize)]
@@ -92,7 +106,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            scan_fonts, edit_names, rename_file, read_text, write_text, file_mtime, is_dir, reveal, open_backups, windows_fonts_dir
+            scan_fonts, edit_names, rename_file, archive_font, install_font, read_text, write_text, file_mtime, is_dir, reveal, open_backups, windows_fonts_dir
         ])
         .run(tauri::generate_context!())
         .expect("error while running Typo");

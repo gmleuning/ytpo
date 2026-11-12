@@ -251,7 +251,7 @@ pub fn inspect(d: &[u8], fallback: &str) -> Vec<FaceMeta> {
             let recs = parse_names(&t);
             let fam = primary(&recs, 16).or_else(|| primary(&recs, 1)).unwrap_or_default();
             if !junk(&fam) { m.family = fam.clone(); }
-            m.style = primary(&recs, 17).or_else(|| primary(&recs, 2)).unwrap_or(m.style);
+            m.style = primary(&recs, 17).or_else(|| primary(&recs, 2)).filter(|s| !junk(s)).unwrap_or(m.style);
             m.full = primary(&recs, 4).unwrap_or_else(|| format!("{} {}", m.family, m.style));
             m.ps = primary(&recs, 6).unwrap_or_default();
             m.app = primary(&recs, 1).unwrap_or_default();

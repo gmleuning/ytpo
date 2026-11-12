@@ -41,7 +41,8 @@ The same font found in several places shows up once, with every file listed. The
 ## Core Features
 
 * **Live Specimen Preview:** Inspect installed system fonts and local font files (`.ttf`, `.otf`, `.woff`, `.woff2`) in a clean, scrollable grid or list view.
-* **Font details:** Click a font's name to expand it. You'll see:
+* **Clean cards:** each card shows just the name, a **hide** button, the live sample, and its tags (if any). Hover the name for its source and classification.
+* **Font details:** Click a font's name to expand it. This is where you tag it, change its classification, and see where it comes from. You'll also see:
   * a **Label**: a Typo-only name, shown on the card and used for sorting (marked ✎). It doesn't change the font.
   * names in other languages (e.g. the Hangul name of a Korean font)
   * every file the font comes from, and every weight and style
@@ -59,8 +60,13 @@ The same font found in several places shows up once, with every file listed. The
 * **Classification & Tag Filtering:**
   * Filter by primary typographic classifications (**Serif**, **Sans-Serif**, **Monospace**, **Display**, **Script/Handwriting**, **CJK**). Classifications are detected from each font's own tables (CJK code pages and Unicode ranges, OS/2 family class, PANOSE, `post.isFixedPitch`), falling back to name heuristics, and can be overridden per font from the card's dropdown.
   * Filter by custom, user-assigned tags (e.g., `#editorial`, `#brutalist`, `#ui`, `#korean-support`). Selected tags combine with AND; an *untagged* chip finds fonts you haven't sorted yet.
-* **On-the-Fly Tagging:** Type into the `+ tag` field on any card. Enter, comma or space adds tags (with autocomplete from existing tags), Backspace on an empty field removes the last one, × removes a specific tag, and clicking a tag filters by it.
+* **On-the-Fly Tagging:** Open a font's details and type into the `+ tag` field. Enter, comma or space adds tags (with autocomplete from existing tags), Backspace on an empty field removes the last one, × removes a specific tag, and clicking a tag filters by it.
 * **Declutter / Hide Mode:** Mark rarely used, legacy, or OS-locked system fonts as hidden to keep the active workspace focused, with a single toggle to reveal hidden fonts when needed.
+* **Archive:** set an archive folder in Settings (e.g. `I:\My Drive\Archive\Fonts`). **Archive…** in a font's details then:
+  * copies its files there and checks that each copy matches the original
+  * uninstalls it from Windows, or deletes it from its font folder (added files are just un-listed)
+
+  Archived fonts keep their tags and labels and are hidden until you tick **Show archived**. From there, **Install** reinstalls one for your account; the archive copy stays. If an identical file is already in the archive it's reused, and a different file with the same name is saved as `name (2).ttf`. Fonts in `C:\Windows\Fonts` need Typo to run as administrator to be uninstalled. A `.ttc` file holding several families archives all of them, and Typo tells you which before asking.
 * **Markdown Portability (`.md`):** Export your entire tagging taxonomy, hidden font list, and classification overrides into a clean Markdown file, and import it back on any machine or version-control it in an Obsidian vault or Git repository.
   * **Export .md** saves a `font-tags.md` wherever you choose.
   * **Import .md…** (or dropping a `.md` file) is a **one-time copy**: it merges the file in (entries in the file win), but later edits to that file are not picked up.
@@ -69,7 +75,7 @@ The same font found in several places shows up once, with every file listed. The
 
 Keyboard: `/` focuses search, `Esc` clears it, `F5` rescans.
 
-**Settings** (top right) holds font folders, the installed-fonts switch, export scope, the live-reload switch for a linked `.md`, the backups folder, and data resets.
+**Settings** (top right) holds font folders, the archive folder, the installed-fonts switch, export scope, the live-reload switch for a linked `.md`, the backups folder, and data resets.
 
 ---
 
@@ -140,6 +146,7 @@ Font headings (`###`) use the font's family name from its `name` table (typograp
 | `src-tauri/src/sfnt.rs` | Reads and rewrites font binaries (TTF/OTF/TTC/WOFF): names, classification, name-table rebuild |
 | `src-tauri/src/scan.rs` | Finds fonts (installed, folders, files) and caches their metadata |
 | `src-tauri/src/edit.rs` | Name edits and file renames, with backups (tests: `cargo test` in `src-tauri`) |
+| `src-tauri/src/archive.rs` | Archive (verified copy, then uninstall or remove) and install for the current user |
 | `src-tauri/src/winfonts.rs` | Windows font registry; unloading and reloading installed fonts |
 | `src-tauri/src/main.rs` | The commands the UI calls |
 

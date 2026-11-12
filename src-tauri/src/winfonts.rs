@@ -92,3 +92,30 @@ pub fn update_entry(i: &Installed, new_path: Option<&Path>, new_full: Option<&st
     if name != i.reg_name { k.delete_value(&i.reg_name).map_err(|e| e.to_string())?; }
     k.set_value(&name, &data).map_err(|e| e.to_string())
 }
+
+pub fn user_fonts_dir() -> PathBuf {
+    PathBuf::from(std::env::var("LOCALAPPDATA").unwrap_or_default()).join(r"Microsoft\Windows\Fonts")
+}
+
+fn writable(source: &str) -> Result<RegKey, String> {
+    hive(source).open_subkey_with_flags(KEY, KEY_READ | KEY_WRITE).map_err(|_| {
+        if source == "user" { "Couldn't open your font registry key.".to_string() }
+        else { "This font is installed for all users; uninstalling it needs Typo to run as administrator.".to_string() }
+    })
+}
+
+/// Removes an installed font's registry entry (remembering nothing — see `restore_entry`).
+pub fn remove_entry(i: &Installed) -> Result<(), String> {
+    writable(i.source)?.delete_value(&i.reg_name).map_err(|e| e.to_string())
+}
+
+/// Puts back an entry removed by `remove_entry` (used to roll back a failed uninstall).
+pub fn restore_entry(i: &Installed) -> Result<(), String> {
+    let data = if i.source == "user" { i.path.to_string_lossy().into_owned() }
+        else { i.path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default() };
+    writable(i.source)?.set_value(&i.reg_name, &data).map_err(|e| e.to_string())
+}
+
+pub fn add_user_entry(name: &str, path: &Path) -> Result<(), String> {
+    writable("user")?.set_value(name, &path.to_string_lossy().into_owned()).map_err(|e| e.to_string())
+}

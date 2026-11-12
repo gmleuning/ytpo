@@ -60,6 +60,7 @@
 
       <section>
         <label class="check"><input id="showHidden" type="checkbox"> Show hidden <span id="hiddenCount" class="muted"></span></label>
+        <label class="check" id="archivedRow"><input id="showArchived" type="checkbox"> Show archived <span id="archivedCount" class="muted"></span></label>
       </section>
 
       <section class="actions">
@@ -101,6 +102,12 @@
       <ul id="folderList" class="folder-list"></ul>
       <p class="inline"><input id="folderPath" type="text" spellcheck="false" placeholder="e.g. D:\Fonts or C:\Windows\Fonts"> <button id="folderAdd">Add</button> <button id="folderBrowse">Browse…</button></p>
       <ul id="scanErrors" class="errors small" hidden></ul>
+    </section>
+
+    <section>
+      <h3>Archive folder</h3>
+      <p class="muted small"><b>Archive…</b> on a font copies its files here, checks the copy, then uninstalls it (or deletes it from its font folder). Archived fonts are hidden unless you tick <i>Show archived</i>, and can be reinstalled from there.</p>
+      <p class="inline"><input id="archivePath" type="text" spellcheck="false" placeholder="e.g. I:\My Drive\Archive\Fonts"> <button id="archiveBrowse">Browse…</button></p>
     </section>
 
     <section>

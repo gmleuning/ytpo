@@ -1,6 +1,6 @@
 [package]
 name = "typo"
-version = "0.2.0"
+version = "0.3.0"
 description = "Minimal local-first font browser"
 edition = "2021"
 

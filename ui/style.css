@@ -123,6 +123,12 @@ main { flex: 1; overflow-y: auto; padding: 16px; }
 }
 .card.is-hidden { opacity: .45; }
 .card header { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.card header .name { flex: 1; }
+.card .tagview { display: flex; flex-wrap: wrap; gap: 4px; }
+.card .tagview[hidden] { display: none; }
+.card.is-archived { border-style: dashed; }
+.card.is-archived .sample { opacity: .6; }
+.details .cat { font-size: 12px; padding: 3px 6px; }
 
 .card .meta { color: var(--muted); font-size: 11px; white-space: nowrap; margin-right: auto; cursor: pointer; }
 .card .meta:hover { color: var(--ink); }
@@ -163,7 +169,7 @@ main { flex: 1; overflow-y: auto; padding: 16px; }
 }
 .grid.list .card header { width: 300px; flex: none; flex-wrap: wrap; }
 .grid.list .sample { flex: 1; white-space: nowrap; text-overflow: ellipsis; max-height: 1.4em; min-width: 0; }
-.grid.list .tags { width: 240px; flex: none; }
+.grid.list .tagview { width: 240px; flex: none; }
 .grid.list .styles { flex-basis: 100%; }
 
 .empty { text-align: center; padding: 80px 20px; }
@@ -183,7 +189,7 @@ main { flex: 1; overflow-y: auto; padding: 16px; }
   .side { width: auto; border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; }
   .grid { grid-template-columns: 1fr; }
   .grid.list .card { flex-wrap: wrap; }
-  .grid.list .card header, .grid.list .tags { width: 100%; }
+  .grid.list .card header, .grid.list .tagview { width: 100%; }
 }
 
 /* ---------- details panel ---------- */

@@ -8,7 +8,7 @@ const invoke = (cmd, args) => T.core.invoke(cmd, args);
 const fileUrl = (p) => T.core.convertFileSrc(p);
 
 const CATS = ['Serif', 'Sans-Serif', 'Monospace', 'Display', 'Script/Handwriting', 'CJK'];
-const SOURCES = { windows: 'Windows (all users)', user: 'Installed by you', folder: 'Folders', file: 'Added files' };
+const SOURCES = { windows: 'Windows (all users)', user: 'Installed by you', folder: 'Folders', file: 'Added files', archive: 'Archive' };
 const LS_META = 'typo.meta.v1';
 const LS_UI = 'typo.ui.v1';
 const LS_SET = 'typo.settings.v2';
@@ -43,7 +43,7 @@ const ui = Object.assign({
   size: 48, track: 0, view: 'grid', showHidden: false,
 }, load(LS_UI, {}));
 const settings = Object.assign({
-  installed: true, folders: [], files: [], exportAll: true, watch: true, linked: null,
+  installed: true, folders: [], files: [], exportAll: true, watch: true, linked: null, archive: '',
 }, load(LS_SET, {}));
 const filter = { q: '', cats: new Set(), tags: new Set(), sources: new Set() };
 const saveSettings = () => save(LS_SET, settings);
@@ -93,7 +93,7 @@ async function rescan() {
     const t0 = performance.now();
     let res;
     try {
-      res = await invoke('scan_fonts', { folders: settings.folders, files: settings.files, installed: settings.installed });
+      res = await invoke('scan_fonts', { folders: settings.folders, files: settings.files, installed: settings.installed, archive: settings.archive || null });
     } catch (e) { status(`Scan failed: ${e}`); return; }
     ingest(res.faces);
     for (const f of fonts.values()) if (f.cat && meta[f.family]?.category === f.cat) {
@@ -323,76 +323,56 @@ function syncCat(f) {
 }
 
 function renderTags(f) {
-  const box = f.card.querySelector('.tags');
+  const tags = m(f.family).tags;
+  const filterBy = (t) => () => { filter.tags.has(t) ? filter.tags.delete(t) : filter.tags.add(t); renderSidebar(); applyFilter(); };
+  // Read-only chips on the card; editable ones in the details panel.
+  const view = f.card.querySelector('.tagview');
+  view.replaceChildren(...tags.map((t) => el('span', { className: 'tag', textContent: '#' + t, title: 'Filter by this tag', onclick: filterBy(t) })));
+  view.hidden = !tags.length;
+  const box = f.card.querySelector('.details .tags');
+  if (!box) return;
   const input = box.querySelector('.tag-in');
   box.querySelectorAll('.tag').forEach((t) => t.remove());
-  for (const t of m(f.family).tags) {
+  for (const t of tags) {
     const x = el('b', { textContent: '×', title: 'Remove tag' });
     x.onclick = (ev) => { ev.stopPropagation(); setMeta(f.family, { tags: m(f.family).tags.filter((y) => y !== t) }); renderTags(f); renderSidebar(); };
-    const chip = el('span', { className: 'tag', title: 'Filter by this tag' }, '#' + t, x);
-    chip.onclick = () => { filter.tags.has(t) ? filter.tags.delete(t) : filter.tags.add(t); renderSidebar(); applyFilter(); };
-    box.insertBefore(chip, input);
+    box.insertBefore(el('span', { className: 'tag', title: 'Filter by this tag', onclick: filterBy(t) }, '#' + t, x), input);
   }
 }
 
 const sourcesOf = (f) => uniq(f.styles.flatMap((s) => s.files.map((x) => x.source)));
+/** Archived = every file of the family is in the archive folder (nothing installed or in use elsewhere). */
+const isArchived = (f) => sourcesOf(f).every((s) => s === 'archive');
+const isInstalled = (f) => sourcesOf(f).some((s) => s === 'windows' || s === 'user');
 function sourceLabel(f) {
   const n = f.styles.length;
-  const src = sourcesOf(f).map((s) => ({ windows: 'Windows', user: 'installed by you', folder: 'folder', file: 'file' })[s]);
+  const src = sourcesOf(f).map((s) => ({ windows: 'Windows', user: 'installed by you', folder: 'folder', file: 'added file', archive: 'archived' })[s]);
   return `${n} style${n > 1 ? 's' : ''} · ${src.join(' + ')}`;
 }
 
 function buildCard(f) {
-  const nameEl = el('button', { className: 'name', title: 'Show details' });
-  const metaEl = el('span', { className: 'meta', title: 'Show details' });
+  const nameEl = el('button', { className: 'name' });
   const hideBtn = el('button', { className: 'icon' });
-  const rmBtn = el('button', { className: 'icon', textContent: '✕', title: 'Remove the added font files from Typo (files stay on disk)' });
-  const sel = el('select', { className: 'cat', title: 'Classification' });
   const sample = el('div', { className: 'sample', textContent: ui.text });
-  const tagIn = el('input', { className: 'tag-in', placeholder: '+ tag', spellcheck: false });
-  tagIn.setAttribute('list', 'tagList');
-  const card = el('article', { className: 'card' },
-    el('header', {}, nameEl, metaEl, sel, hideBtn, rmBtn),
-    sample,
-    el('div', { className: 'tags' }, tagIn));
+  const tagView = el('div', { className: 'tagview' });
+  const card = el('article', { className: 'card' }, el('header', {}, nameEl, hideBtn), sample, tagView);
   card.dataset.family = f.family;
 
   // Handlers look up the current font object, since a rescan replaces it.
   let cur = f;
-  nameEl.onclick = metaEl.onclick = () => toggleDetails(cur);
-  sel.onchange = () => { setMeta(cur.family, { category: sel.value || undefined }); syncCat(cur); renderSidebar(); applyFilter(); };
+  nameEl.onclick = () => toggleDetails(cur);
   hideBtn.onclick = () => { setMeta(cur.family, { hidden: !m(cur.family).hidden }); cur.refresh(); renderSidebar(); applyFilter(); };
-  rmBtn.onclick = () => {
-    const mine = new Set(cur.styles.flatMap((s) => s.files.filter((x) => x.source === 'file').map((x) => x.path)));
-    settings.files = settings.files.filter((p) => !mine.has(p)); saveSettings(); rescan();
-  };
-
-  const commit = () => {
-    const add = tagIn.value.split(/[,\s]+/).map(normTag).filter(Boolean);
-    tagIn.value = '';
-    if (!add.length) return;
-    setMeta(cur.family, { tags: uniq([...m(cur.family).tags, ...add]) });
-    renderTags(cur); renderSidebar(); renderTagList();
-  };
-  tagIn.onkeydown = (e) => {
-    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commit(); }
-    else if (e.key === 'Backspace' && !tagIn.value) {
-      const t = m(cur.family).tags; if (t.length) { setMeta(cur.family, { tags: t.slice(0, -1) }); renderTags(cur); renderSidebar(); }
-    } else if (e.key === 'Escape') { tagIn.value = ''; tagIn.blur(); }
-  };
-  tagIn.onblur = commit;
 
   /** Re-syncs everything on the card from state (after imports, edits, rescans). */
   const refresh = () => {
     const x = m(cur.family);
     nameEl.textContent = title(cur);
     nameEl.classList.toggle('renamed', !!x.title);
-    nameEl.title = x.title ? `${cur.family} — click for details` : 'Click for details';
-    metaEl.textContent = sourceLabel(cur);
+    nameEl.title = `${title(cur)}${x.title ? ` (${cur.family})` : ''}\n${sourceLabel(cur)} · ${category(cur.family)}\nClick for details`;
     hideBtn.textContent = x.hidden ? 'unhide' : 'hide';
     hideBtn.title = x.hidden ? 'Show in workspace' : 'Hide from workspace';
     card.classList.toggle('is-hidden', !!x.hidden);
-    rmBtn.hidden = !sourcesOf(cur).includes('file');
+    card.classList.toggle('is-archived', isArchived(cur));
     syncCat(cur);
     renderTags(cur);
     const d = card.querySelector('.details');
@@ -516,15 +496,89 @@ function toggleDetails(f) {
     styles.append(r);
   }
 
+  const sel = el('select', { className: 'cat', title: 'Classification' });
+  sel.onchange = () => { setMeta(f.family, { category: sel.value || undefined }); syncCat(f); f.refresh(); renderSidebar(); applyFilter(); };
+  const tagIn = el('input', { className: 'tag-in', placeholder: '+ tag', spellcheck: false });
+  tagIn.setAttribute('list', 'tagList');
+  const commit = () => {
+    const add = tagIn.value.split(/[,\s]+/).map(normTag).filter(Boolean);
+    tagIn.value = '';
+    if (!add.length) return;
+    setMeta(f.family, { tags: uniq([...m(f.family).tags, ...add]) });
+    renderTags(f); renderSidebar(); renderTagList();
+  };
+  tagIn.onkeydown = (e) => {
+    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commit(); }
+    else if (e.key === 'Backspace' && !tagIn.value) {
+      const t = m(f.family).tags; if (t.length) { setMeta(f.family, { tags: t.slice(0, -1) }); renderTags(f); renderSidebar(); }
+    } else if (e.key === 'Escape') { tagIn.value = ''; tagIn.blur(); }
+  };
+  tagIn.onblur = commit;
+
   const box = el('div', { className: 'details' },
+    row('Tags', el('div', { className: 'tags' }, tagIn)),
+    row('Class', sel),
+    row('Source', sourceLabel(f)),
     row('Label', titleIn, el('div', { className: 'muted small', textContent: 'Typo-only label; doesn\u2019t change the font. Empty = family name.' })),
     row('Family', el('div', { className: 'inline' }, famIn, famBtn),
       el('div', { className: 'muted small', textContent: 'Renames the font itself, in every file of this family. Backups are kept.' })),
     alt.length ? row('Other names', alt.join(' · ')) : null,
     row('Files', el('div', { className: 'fedits' }, ...entries.map(([s, x]) => fileEditor(f, s, x)))),
+    row('Archive', libraryActions(f)),
     styles,
   );
   f.card.querySelector('.sample').after(box);
+  syncCat(f);
+  renderTags(f);
+}
+
+/** Archive / install / remove buttons for a family. */
+function libraryActions(f) {
+  const box = el('div', { className: 'btn-row' });
+  if (!isArchived(f)) box.append(el('button', { textContent: 'Archive…', title: 'Copy to your archive folder, then uninstall / remove the original', onclick: () => archiveFamily(f) }));
+  if (sourcesOf(f).includes('archive') && !isInstalled(f)) box.append(el('button', { textContent: 'Install', title: 'Install from the archive for your account', onclick: () => installFamily(f) }));
+  if (sourcesOf(f).includes('file')) box.append(el('button', { textContent: 'Remove from Typo', title: 'Stop listing the added files (they stay on disk)', onclick: () => {
+    const mine = new Set(f.styles.flatMap((s) => s.files.filter((x) => x.source === 'file').map((x) => x.path)));
+    settings.files = settings.files.filter((p) => !mine.has(p)); saveSettings(); rescan();
+  } }));
+  box.append(el('span', { className: 'muted small', textContent: settings.archive ? `Archive folder: ${settings.archive}` : 'Set an archive folder in Settings to use Archive.' }));
+  return box;
+}
+
+/** Unique files of a family matching pred, plus any other families living in the same files (font collections). */
+function filesToMove(f, pred) {
+  const seen = new Map();
+  for (const s of f.styles) for (const x of s.files) if (pred(x) && !seen.has(x.path)) seen.set(x.path, x);
+  const paths = new Set(seen.keys());
+  const others = [...fonts.values()].filter((g) => g !== f && g.styles.some((s) => s.files.some((x) => paths.has(x.path)))).map((g) => g.family);
+  return { files: [...seen.values()], others };
+}
+
+async function archiveFamily(f) {
+  if (!settings.archive) { alert('Choose an archive folder in Settings first.'); renderFolders(); $('#settings').showModal(); return; }
+  const { files, others } = filesToMove(f, (x) => x.source !== 'archive');
+  if (!files.length) return;
+  const n = (src) => files.filter((x) => x.source === src).length;
+  const steps = [`• Copy ${files.length} file${files.length > 1 ? 's' : ''} to ${settings.archive} (and check the copy)`];
+  if (n('user') || n('windows')) steps.push(`• Uninstall ${n('user') + n('windows')} file(s) from Windows and delete the installed copy`);
+  if (n('windows')) steps.push('  (fonts in C:\\Windows\\Fonts need Typo to run as administrator)');
+  if (n('folder')) steps.push(`• Delete the original from its font folder (${n('folder')} file(s))`);
+  if (n('file')) steps.push(`• Stop listing ${n('file')} added file(s) (the originals stay where they are)`);
+  if (others.length) steps.push(`\nThese files also contain: ${others.join(', ')}. They will be archived too.`);
+  if (!confirm(`Archive "${title(f)}"?\n\n${steps.join('\n')}\n\nTags and labels are kept, and you can reinstall it later (Show archived → Install).`)) return;
+  const jobs = files.map((x) => async () => {
+    const r = await invoke('archive_font', { path: x.path, source: x.source, archiveDir: settings.archive });
+    if (x.source === 'file') { settings.files = settings.files.filter((p) => p !== x.path); saveSettings(); }
+    return r.notes;
+  });
+  await runEdits(`Archiving ${title(f)}`, jobs);
+}
+
+async function installFamily(f) {
+  const { files, others } = filesToMove(f, (x) => x.source === 'archive');
+  if (!files.length) return;
+  if (!confirm(`Install "${title(f)}" for your Windows account from the archive?${others.length ? `\n\nThe same files also contain: ${others.join(', ')}.` : ''}\n\nThe archive copy is kept.`)) return;
+  await runEdits(`Installing ${title(f)}`, files.map((x) => () => invoke('install_font', { path: x.path })));
 }
 
 function styleOrder(a, b) {
@@ -545,6 +599,7 @@ function haystack(f) {
 function visible(f) {
   const x = m(f.family);
   if (x.hidden && !ui.showHidden) return false;
+  if (isArchived(f) && !ui.showArchived) return false;
   if (filter.q && !haystack(f).includes(filter.q)) return false;
   if (filter.cats.size && !filter.cats.has(category(f.family))) return false;
   if (filter.sources.size && !sourcesOf(f).some((s) => filter.sources.has(s))) return false;
@@ -580,7 +635,7 @@ function chip(label, count, on, onclick) {
 const toggler = (set, v) => () => { set.has(v) ? set.delete(v) : set.add(v); renderSidebar(); applyFilter(); };
 
 function renderSidebar() {
-  const pool = [...fonts.values()].filter((f) => ui.showHidden || !m(f.family).hidden);
+  const pool = [...fonts.values()].filter((f) => (ui.showHidden || !m(f.family).hidden) && (ui.showArchived || !isArchived(f)));
   const catN = Object.fromEntries(CATS.map((c) => [c, 0]));
   for (const f of pool) catN[category(f.family)]++;
   $('#cats').replaceChildren(...CATS.map((c) => chip(c, catN[c], filter.cats.has(c), toggler(filter.cats, c))));
@@ -601,6 +656,9 @@ function renderSidebar() {
 
   const hid = [...fonts.keys()].filter((f) => m(f).hidden).length;
   $('#hiddenCount').textContent = hid ? `(${hid})` : '';
+  const arch = [...fonts.values()].filter(isArchived).length;
+  $('#archivedCount').textContent = arch ? `(${arch})` : '';
+  $('#archivedRow').hidden = !settings.archive;
 }
 
 function renderTagList() {
@@ -666,6 +724,7 @@ $('#sample').value = ui.text;
 $('#size').value = ui.size;
 $('#track').value = ui.track;
 $('#showHidden').checked = ui.showHidden;
+$('#showArchived').checked = !!ui.showArchived;
 
 $('#sample').oninput = (e) => setText(e.target.value);
 $('#preset').onchange = (e) => { if (e.target.value) { $('#sample').value = e.target.value; setText(e.target.value); } e.target.value = ''; };
@@ -674,6 +733,7 @@ $('#track').oninput = (e) => { ui.track = +e.target.value; applyUI(); };
 $('#viewGrid').onclick = () => { ui.view = 'grid'; applyUI(); };
 $('#viewList').onclick = () => { ui.view = 'list'; applyUI(); };
 $('#showHidden').onchange = (e) => { ui.showHidden = e.target.checked; save(LS_UI, ui); renderSidebar(); applyFilter(); };
+$('#showArchived').onchange = (e) => { ui.showArchived = e.target.checked; save(LS_UI, ui); renderSidebar(); applyFilter(); };
 $('#search').oninput = (e) => { filter.q = e.target.value.trim().toLowerCase(); applyFilter(); };
 $('#clearTags').onclick = () => { filter.tags.clear(); filter.cats.clear(); filter.sources.clear(); renderSidebar(); applyFilter(); };
 
@@ -711,6 +771,15 @@ for (const r of document.querySelectorAll('input[name=scope]')) r.onchange = () 
 $('#folderPath').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#folderAdd').click(); } };
 $('#folderAdd').onclick = async () => { await addFolderPath($('#folderPath').value); $('#folderPath').value = ''; };
 $('#folderBrowse').onclick = browseFolder;
+$('#archivePath').value = settings.archive || '';
+const setArchive = async (p) => {
+  p = (p || '').trim().replace(/^"|"$/g, '').replace(/[\/]+$/, '');
+  settings.archive = p; saveSettings(); $('#archivePath').value = p;
+  if (p && !(await invoke('is_dir', { path: p }))) status(`Archive folder will be created when you first archive a font: ${p}`);
+  rescan();
+};
+$('#archivePath').onchange = (e) => setArchive(e.target.value);
+$('#archiveBrowse').onclick = async () => { const p = await T.dialog.open({ directory: true, title: 'Choose the archive folder' }); if (p) setArchive(p); };
 $('#openBackups').onclick = () => invoke('open_backups');
 $('#rescan2').onclick = () => rescan();
 $('#resetMeta').onclick = () => {

@@ -70,7 +70,7 @@ pub fn read_faces(p: &Path) -> Vec<FaceMeta> {
     }
 }
 
-pub fn scan(folders: &[String], files: &[String], installed: bool, cache_path: &Path) -> ScanResult {
+pub fn scan(folders: &[String], files: &[String], installed: bool, archive: Option<&str>, cache_path: &Path) -> ScanResult {
     let mut errors = Vec::new();
     // (path, source, folder)
     let mut list: Vec<(PathBuf, String, Option<String>)> = Vec::new();
@@ -95,6 +95,14 @@ pub fn scan(folders: &[String], files: &[String], installed: bool, cache_path: &
         if !root.is_dir() { errors.push(format!("Folder not found: {f}")); continue; }
         walk(&root, &mut found, &mut errors, 0);
         for p in found { add(p, "folder", Some(f.clone()), &mut list); }
+    }
+    if let Some(a) = archive.filter(|a| !a.is_empty()) {
+        let root = PathBuf::from(a);
+        if root.is_dir() {
+            let mut found = Vec::new();
+            walk(&root, &mut found, &mut errors, 0);
+            for p in found { add(p, "archive", Some(a.to_string()), &mut list); }
+        }
     }
     for f in files {
         let p = PathBuf::from(f);
