@@ -89,6 +89,7 @@ code { background: var(--chip); padding: 1px 4px; border-radius: 4px; }
   display: flex; justify-content: space-between; align-items: baseline;
 }
 .side section { display: flex; flex-direction: column; }
+.side .count { margin-top: -12px; }
 .actions { gap: 6px; }
 .actions button { text-align: left; }
 .check { display: flex; align-items: center; gap: 6px; cursor: pointer; }
@@ -217,3 +218,20 @@ dialog p { margin: 0; }
 .folder-list li { display: flex; align-items: center; gap: 8px; }
 .folder-list .fname { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ---------- desktop additions ---------- */
+.inline { display: flex; gap: 6px; align-items: center; }
+.inline input { flex: 1; min-width: 0; }
+.fedits { display: flex; flex-direction: column; gap: 4px; }
+.fedit { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+.fedit[open] { padding-bottom: 8px; }
+.fedit summary { cursor: pointer; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fedit .frow { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.fedit .frow span { width: 72px; flex: none; color: var(--muted); font-size: 11px; }
+.fedit .frow input { flex: 1; min-width: 0; padding: 3px 6px; font-size: 12px; }
+.fedit p { margin: 6px 0 0; }
+button.primary-sm { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: default; }
+.errors { margin: 0; padding-left: 16px; color: var(--accent); max-height: 120px; overflow-y: auto; }
+.folder-list .fname { font-weight: 400; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+dialog { width: min(640px, calc(100vw - 32px)); }

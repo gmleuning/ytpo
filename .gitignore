@@ -1,0 +1,8 @@
+# Personal taxonomy exports and other private files
+/private/
+/font-tags.md
+
+# Build output
+/node_modules/
+/src-tauri/target/
+/src-tauri/gen/

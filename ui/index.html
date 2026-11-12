@@ -41,6 +41,7 @@
   <div class="layout">
     <aside class="side">
       <input id="search" type="search" placeholder="Search fonts  /" spellcheck="false">
+      <div id="count" class="muted small count"></div>
 
       <section>
         <h3>Classification</h3>
@@ -48,7 +49,12 @@
       </section>
 
       <section>
-        <h3>Tags <button id="clearTags" class="link" hidden>clear</button></h3>
+        <h3>Source</h3>
+        <div id="sources" class="chips"></div>
+      </section>
+
+      <section>
+        <h3>Tags <button id="clearTags" class="link" hidden>clear filters</button></h3>
         <div id="tags" class="chips"></div>
       </section>
 
@@ -60,16 +66,14 @@
         <h3>Library</h3>
         <button id="addFolder">Add font folder…</button>
         <div id="folderStatus" class="muted small"></div>
-        <button id="loadSystem">Load system fonts</button>
         <button id="addFiles">Add font files…</button>
-        <input id="fileInput" type="file" multiple accept=".ttf,.otf,.woff,.woff2,.ttc,.otc" hidden>
+        <button id="rescan" title="Look for new or changed font files (F5)">Rescan</button>
       </section>
 
       <section class="actions">
         <h3>Taxonomy (.md)</h3>
         <button id="exportMd">Export .md</button>
         <button id="importMd">Import .md…</button>
-        <input id="mdInput" type="file" accept=".md,.markdown,.txt" hidden>
         <button id="linkMd" title="Pick an existing .md file; it is loaded, then kept in sync both ways">Link existing .md…</button>
         <button id="newMd" title="Create a new .md file from the current taxonomy and keep it in sync">Link new .md…</button>
         <div id="linkStatus" class="muted small"></div>
@@ -81,8 +85,8 @@
     <main>
       <div id="empty" class="empty">
         <p>No fonts loaded yet.</p>
-        <p><button id="emptyFolder" class="primary">Add font folder…</button> <button id="emptyLoad">Load system fonts</button></p>
-        <p class="muted">…or drop <code>.ttf</code> <code>.otf</code> <code>.woff</code> <code>.woff2</code> files (or a <code>font-tags.md</code>) anywhere.</p>
+        <p><button id="emptyFolder" class="primary">Add font folder…</button></p>
+        <p class="muted">…or drop font files, folders or a <code>font-tags.md</code> anywhere. Installed fonts can be switched on in Settings.</p>
       </div>
       <div id="grid" class="grid"></div>
     </main>
@@ -93,14 +97,15 @@
 
     <section>
       <h3>Font folders</h3>
-      <p class="muted small">Every font file in these folders (and their subfolders) is shown. Nothing is copied, moved or installed.</p>
+      <p class="muted small">Every font file in these folders (and their subfolders) is shown. Nothing is copied, moved or installed. Type or paste any path, including hidden or system folders.</p>
       <ul id="folderList" class="folder-list"></ul>
-      <p><button id="addFolder2">Add folder…</button></p>
+      <p class="inline"><input id="folderPath" type="text" spellcheck="false" placeholder="e.g. D:\Fonts or C:\Windows\Fonts"> <button id="folderAdd">Add</button> <button id="folderBrowse">Browse…</button></p>
+      <ul id="scanErrors" class="errors small" hidden></ul>
     </section>
 
     <section>
-      <h3>System fonts</h3>
-      <label class="check"><input id="setSystem" type="checkbox"> Load installed system fonts on startup</label>
+      <h3>Installed fonts</h3>
+      <label class="check"><input id="setInstalled" type="checkbox"> Show fonts installed on this PC (all users and just you)</label>
     </section>
 
     <section>
@@ -113,9 +118,9 @@
     <section>
       <h3>Data</h3>
       <p class="btn-row">
-        <button id="redetect" title="Forget cached classifications and names, then reload">Re-detect classifications</button>
-        <button id="clearDropped">Remove dropped files</button>
-        <button id="resetMeta">Clear all tags &amp; titles…</button>
+        <button id="rescan2">Rescan fonts</button>
+        <button id="openBackups" title="Every font file Typo edits is backed up here first">Open backups folder</button>
+        <button id="resetMeta">Clear all tags &amp; labels…</button>
       </p>
     </section>
   </dialog>
