@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Typo</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="tester">
+    <div class="brand">Typo</div>
+    <input id="sample" class="sample-input" type="text" spellcheck="false"
+           placeholder="Type to preview…" value="The quick brown fox jumps over the lazy dog">
+    <select id="preset" title="Sample presets">
+      <option value="">Presets</option>
+      <option>The quick brown fox jumps over the lazy dog</option>
+      <option>Sphinx of black quartz, judge my vow</option>
+      <option>ABCDEFGHIJKLMNOPQRSTUVWXYZ</option>
+      <option>abcdefghijklmnopqrstuvwxyz</option>
+      <option>0123456789 $€£¥ %‰ +−×÷=</option>
+      <option>!?&amp;@#*()[]{}«»“”‘’—–…</option>
+      <option>Aa Gg Rr Qq 1Il0O</option>
+      <option>다람쥐 헌 쳇바퀴에 타고파</option>
+      <option>いろはにほへと ちりぬるを</option>
+    </select>
+    <label class="ctl" title="Font size">
+      <span>Size <output id="sizeOut">48</output></span>
+      <input id="size" type="range" min="10" max="200" value="48">
+    </label>
+    <label class="ctl" title="Tracking (letter-spacing)">
+      <span>Tracking <output id="trackOut">0</output></span>
+      <input id="track" type="range" min="-100" max="300" step="5" value="0">
+    </label>
+    <div class="seg" role="group" aria-label="View">
+      <button id="viewGrid" class="on" title="Grid view">Grid</button>
+      <button id="viewList" title="List view">List</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="side">
+      <input id="search" type="search" placeholder="Search fonts  /" spellcheck="false">
+
+      <section>
+        <h3>Classification</h3>
+        <div id="cats" class="chips"></div>
+      </section>
+
+      <section>
+        <h3>Tags <button id="clearTags" class="link" hidden>clear</button></h3>
+        <div id="tags" class="chips"></div>
+      </section>
+
+      <section>
+        <label class="check"><input id="showHidden" type="checkbox"> Show hidden <span id="hiddenCount" class="muted"></span></label>
+      </section>
+
+      <section class="actions">
+        <h3>Library</h3>
+        <button id="loadSystem">Load system fonts</button>
+        <button id="addFiles">Add font files…</button>
+        <input id="fileInput" type="file" multiple accept=".ttf,.otf,.woff,.woff2,.ttc" hidden>
+      </section>
+
+      <section class="actions">
+        <h3>Taxonomy (.md)</h3>
+        <button id="exportMd">Export .md</button>
+        <button id="importMd">Import .md…</button>
+        <input id="mdInput" type="file" accept=".md,.markdown,.txt" hidden>
+        <button id="linkMd" title="Keep a Markdown file in sync with every change">Link .md file…</button>
+        <div id="linkStatus" class="muted small"></div>
+      </section>
+
+      <p id="status" class="muted small"></p>
+    </aside>
+
+    <main>
+      <div id="empty" class="empty">
+        <p>No fonts loaded yet.</p>
+        <p><button id="emptyLoad" class="primary">Load system fonts</button></p>
+        <p class="muted">…or drop <code>.ttf</code> <code>.otf</code> <code>.woff</code> <code>.woff2</code> files (or a <code>font-tags.md</code>) anywhere.</p>
+      </div>
+      <div id="grid" class="grid"></div>
+    </main>
+  </div>
+
+  <datalist id="tagList"></datalist>
+  <div id="drop" class="drop">Drop fonts or a .md taxonomy</div>
+  <script src="app.js"></script>
+</body>
+</html>
