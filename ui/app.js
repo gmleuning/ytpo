@@ -528,7 +528,7 @@ function fileEditor(f, s, file) {
 /** Expandable details: variations, class, family (rename / group), files, tags, archive. */
 function toggleDetails(f) {
   const existing = f.card.querySelector('.details');
-  if (existing) { existing.remove(); return; }
+  if (existing) { existing.remove(); updateCloseAll(); return; }
 
   const row = (label, ...content) => el('div', { className: 'row' }, el('span', { className: 'k', textContent: label }), el('div', { className: 'v' }, ...content));
   const order = styleOrder(f);
@@ -622,6 +622,7 @@ function toggleDetails(f) {
   f.card.querySelector('.sample').after(box);
   syncCat(f);
   renderTags(f);
+  updateCloseAll();
 }
 
 /** Prefixes of this family's name shared with other cards ("Franklin Gothic" for "Franklin Gothic Demi Cond"). */
@@ -757,12 +758,30 @@ function rebuild() {
   if (settings.exportAll) scheduleLinkedWrite();
 }
 
+/** The card you last clicked or typed in: re-filtering keeps it where it was on screen. */
+let anchorCard = null;
+grid.addEventListener('pointerdown', (e) => { anchorCard = e.target.closest('.card'); });
+grid.addEventListener('focusin', (e) => { anchorCard = e.target.closest('.card'); });
+
 function applyFilter() {
+  const scroller = $('main');
+  const top = scroller.scrollTop;
+  const anchor = anchorCard?.isConnected ? anchorCard : null;
+  const before = anchor?.getBoundingClientRect().top;
   const frag = document.createDocumentFragment();
   let n = 0;
   for (const f of sorted) if (visible(f)) { frag.append(f.card || buildCard(f)); n++; }
   grid.replaceChildren(frag);
+  if (anchor?.isConnected) scroller.scrollTop = top + (anchor.getBoundingClientRect().top - before);
+  else scroller.scrollTop = top;
   $('#count').textContent = fonts.size ? `${n} of ${fonts.size} families` : '';
+  updateCloseAll();
+}
+
+function updateCloseAll() { $('#closeAll').disabled = !grid.querySelector('.details'); }
+function closeAll() {
+  grid.querySelectorAll('.details').forEach((d) => d.remove());
+  updateCloseAll();
 }
 
 function chip(label, count, on, onclick) {
@@ -911,6 +930,7 @@ $('#setSources').checked = !!settings.showSources;
 $('#setSources').onchange = (e) => { settings.showSources = e.target.checked; if (!settings.showSources) filter.sources.clear(); saveSettings(); renderSidebar(); applyFilter(); };
 
 $('#emptyFolder').onclick = browseFolder;
+$('#closeAll').onclick = closeAll;
 $('#addFiles').onclick = async () => {
   const picked = await T.dialog.open({ multiple: true, title: 'Add font files', filters: [{ name: 'Fonts', extensions: FONT_EXT }] });
   if (picked?.length) addPaths([].concat(picked));
