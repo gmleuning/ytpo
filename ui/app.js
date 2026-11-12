@@ -1,13 +1,14 @@
-/* Typo — minimal local-first font browser (desktop UI).
+/* Ytpo — minimal local-first font browser (desktop UI).
  * The Rust side (src-tauri) finds and reads font files, edits them, and reads/writes the .md file.
- * Typo's own data (labels, tags, overrides, hidden) lives in localStorage and the Markdown file. */
+ * Ytpo's own data (tags, overrides, groups, hidden) lives in localStorage and the Markdown file. */
 'use strict';
 
 const T = window.__TAURI__;
 const invoke = (cmd, args) => T.core.invoke(cmd, args);
 const fileUrl = (p) => T.core.convertFileSrc(p);
 
-const CATS = ['Serif', 'Sans-Serif', 'Monospace', 'Display', 'Script/Handwriting', 'CJK'];
+const DEFAULT_CATS = ['Serif', 'Sans-Serif', 'Monospace', 'Display', 'Script/Handwriting', 'CJK', 'Blackletter', 'Symbol', 'Math', 'Cyrillic', 'Greek', 'Arabic'];
+const ACCENTS = { Red: '#d62d2d', Orange: '#d9480f', Amber: '#b7791f', Green: '#2f8f4e', Teal: '#138a8a', Blue: '#2f6fdb', Violet: '#7b4fd6', Pink: '#c2367a' };
 const SOURCES = { windows: 'Windows (all users)', user: 'Installed by you', folder: 'Folders', file: 'Added files', archive: 'Archive' };
 const LS_META = 'typo.meta.v1';
 const LS_UI = 'typo.ui.v1';
@@ -44,7 +45,9 @@ const ui = Object.assign({
 }, load(LS_UI, {}));
 const settings = Object.assign({
   installed: true, folders: [], files: [], exportAll: true, watch: true, linked: null, archive: '',
+  cats: DEFAULT_CATS, showSources: false, theme: 'system', accent: ACCENTS.Red,
 }, load(LS_SET, {}));
+const CATS = () => settings.cats;
 const filter = { q: '', cats: new Set(), tags: new Set(), sources: new Set() };
 const saveSettings = () => save(LS_SET, settings);
 
@@ -54,8 +57,10 @@ function clean(fam, x) {
   if (!x.title || x.title === fam) delete x.title;
   if (!x.category) delete x.category;
   if (!x.hidden) delete x.hidden;
+  if (x.group != null) x.group = x.group.trim();
+  if (!x.group || x.group === fam) delete x.group;
   x.tags ??= [];
-  return x.tags.length || x.title || x.category || x.hidden ? x : null;
+  return x.tags.length || x.title || x.category || x.hidden || x.group ? x : null;
 }
 function setMeta(family, patch) {
   const x = clean(family, { tags: [], ...meta[family], ...patch });
@@ -111,20 +116,27 @@ async function rescan() {
 }
 let lastErrors = [];
 
+let lastFaces = [];
+
+/** Builds the library from scanned faces. Families you grouped (meta.group) share one card. */
 function ingest(faces) {
+  lastFaces = faces;
   const old = fonts;
   fonts = new Map();
   const byPs = new Map();
   for (const fc of faces) {
     const file = { path: fc.path, index: fc.index, source: fc.source, folder: fc.folder, editable: fc.editable, mtime: fc.mtime };
     if (fc.ps && byPs.has(fc.ps)) { byPs.get(fc.ps).files.push(file); continue; }
-    let f = fonts.get(fc.family);
-    if (!f) { f = { family: fc.family, cat: null, styles: [] }; fonts.set(fc.family, f); }
-    const s = { family: fc.family, style: fc.style, full: fc.full, ps: fc.ps, app: fc.app, alt: fc.alt || [], cat: fc.cat, files: [file] };
+    const key = meta[fc.family]?.group || fc.family;
+    let f = fonts.get(key);
+    if (!f) { f = { family: key, cat: null, styles: [], members: new Set() }; fonts.set(key, f); }
+    f.members.add(fc.family);
+    const s = { family: fc.family, style: fc.style, full: fc.full, ps: fc.ps, app: fc.app, alt: fc.alt || [], cat: fc.cat, cmap: fc.cmap || [], files: [file] };
     f.styles.push(s);
     if (fc.ps) byPs.set(fc.ps, s);
   }
   for (const f of fonts.values()) {
+    f.grouped = f.members.size > 1 || !f.members.has(f.family);
     f.cat = rep(f).cat || f.styles.find((s) => s.cat)?.cat || null;
     // Keep existing cards when the family survived, so scrolling position and open panels aren't lost.
     const prev = old.get(f.family);
@@ -133,7 +145,23 @@ function ingest(faces) {
 }
 
 const REGULAR = /^(regular|normal|book|roman|plain|medium)$/i;
-function rep(f) { return f.styles.find((s) => REGULAR.test(s.style)) || f.styles.find((s) => !/italic|oblique/i.test(s.style)) || f.styles[0]; }
+function rep(f) {
+  const n = (s) => styleName(f, s);
+  return f.styles.find((s) => REGULAR.test(n(s))) || f.styles.slice().sort(styleOrder(f)).find((s) => !/italic|oblique/i.test(n(s))) || f.styles[0];
+}
+/** A style's name on its card: in a group, the full name minus the group name ("Demi Cond Italic"). */
+function styleName(f, s) {
+  if (!f.grouped) return s.style;
+  const full = s.full || `${s.family} ${s.style}`;
+  const rest = full.toLowerCase().startsWith(f.family.toLowerCase()) ? full.slice(f.family.length).trim() : full;
+  return rest || s.style;
+}
+
+/** Re-applies grouping after groups change (no disk scan needed). */
+function regroup() {
+  if (lastFaces.length) ingest(lastFaces);
+  rebuild();
+}
 
 /* ------------------------------------------------------------ font faces */
 
@@ -158,18 +186,49 @@ function ensureFace(s) {
   return alias;
 }
 
+/* ---------------------------------------------------------- glyph coverage */
+
+/** True if the style's font really has the character (unknown coverage counts as yes). */
+function covers(s, cp) {
+  const r = s.cmap;
+  if (!r || !r.length || cp <= 0x20 || (cp >= 0x2000 && cp <= 0x200f) || cp === 0xa0 || cp === 0x3000) return true;
+  let lo = 0, hi = r.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (cp < r[mid][0]) hi = mid - 1; else if (cp > r[mid][1]) lo = mid + 1; else return true;
+  }
+  return false;
+}
+
+/** Writes text into node; characters the font lacks (shown by a fallback font) are greyed out. */
+function renderSample(node, text, s) {
+  if (!s?.cmap?.length) { node.textContent = text; return; }
+  node.replaceChildren();
+  let run = '', miss = false;
+  const flush = () => { if (run) node.append(miss ? el('span', { className: 'miss', textContent: run }) : run); run = ''; };
+  for (const ch of text) {
+    const m2 = !covers(s, ch.codePointAt(0));
+    if (m2 !== miss) { flush(); miss = m2; }
+    run += ch;
+  }
+  flush();
+}
+
 /* ---------------------------------------------------------------- markdown */
 
 function normCat(s) {
-  const t = (s || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+  const raw = (s || '').trim();
+  const t = raw.toLowerCase().replace(/[\s_]+/g, '-');
   if (!t) return null;
+  const known = CATS().find((c) => c.toLowerCase().replace(/[\s_]+/g, '-') === t);
+  if (known) return known;
   if (t.startsWith('sans')) return 'Sans-Serif';
   if (t.startsWith('serif')) return 'Serif';
   if (t.startsWith('mono')) return 'Monospace';
   if (t.startsWith('display') || t.startsWith('decorative')) return 'Display';
   if (t.startsWith('script') || t.startsWith('hand')) return 'Script/Handwriting';
   if (/^(cjk|hangul|korean|japanese|chinese)/.test(t)) return 'CJK';
-  return null;
+  return raw;
 }
 const normTag = (s) => s.trim().replace(/^#+/, '').toLowerCase().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}_\-/]/gu, '');
 const filesOf = (f) => uniq(f.styles.flatMap((s) => s.files.map((x) => x.path)));
@@ -180,6 +239,7 @@ function exportMarkdown() {
   const rows = [...fams].sort((a, b) => a.localeCompare(b));
   const entry = (fam) => {
     const x = m(fam), f = fonts.get(fam);
+    if (x.group) return `### ${fam}\n- **Group:** ${x.group}\n`;
     const cat = x.category || (f ? category(fam) : '');
     const files = f ? filesOf(f) : [];
     return [
@@ -218,6 +278,7 @@ function parseMarkdown(text) {
       else if (key === 'title' || key === 'name') out[cur].title = val;
       else if (key === 'tags') out[cur].tags = uniq([...val.matchAll(/#([^\s,#]+)/g)].map((x) => normTag(x[1])));
       else if (key === 'status') out[cur].hidden = /hidden/i.test(val);
+      else if (key === 'group') out[cur].group = val;
     }
   });
   return out;
@@ -229,10 +290,11 @@ function importMarkdown(text, mode = 'merge', fromFile = false) {
   if (mode === 'replace') meta = {};
   for (const [fam, x] of Object.entries(parsed)) {
     const auto = fonts.has(fam) ? autoCat(fam) : null;
-    const e = clean(fam, { title: x.title, tags: x.tags, hidden: x.hidden, category: x.category !== auto ? x.category : undefined });
+    const e = clean(fam, { title: x.title, tags: x.tags, hidden: x.hidden, group: x.group, category: x.category !== auto ? x.category : undefined });
     if (e) meta[fam] = e; else delete meta[fam];
   }
   persistMeta(!fromFile);
+  if (lastFaces.length) ingest(lastFaces);
   for (const f of fonts.values()) f.refresh?.();
   resort(); renderSidebar(); renderTagList(); applyFilter();
   return Object.keys(parsed).length;
@@ -310,14 +372,20 @@ const grid = $('#grid');
 const io = new IntersectionObserver((entries) => {
   for (const e of entries) if (e.isIntersecting) {
     const f = fonts.get(e.target.dataset.family);
-    if (f) e.target.querySelector('.sample').style.fontFamily = `"${ensureFace(rep(f))}", sans-serif`;
+    if (f) {
+      const sm = e.target.querySelector('.sample');
+      sm.style.fontFamily = `"${ensureFace(rep(f))}", sans-serif`;
+      renderSample(sm, ui.text || ' ', rep(f));
+    }
     io.unobserve(e.target);
   }
 }, { rootMargin: '400px' });
 
 function syncCat(f) {
   const sel = f.card?.querySelector('.cat'); if (!sel) return;
-  sel.replaceChildren(el('option', { value: '', textContent: `Auto · ${autoCat(f.family)}` }), ...CATS.map((c) => el('option', { value: c, textContent: c })));
+  const own = m(f.family).category;
+  const list = uniq([...CATS(), own]);
+  sel.replaceChildren(el('option', { value: '', textContent: `Auto · ${autoCat(f.family)}` }), ...list.map((c) => el('option', { value: c, textContent: c })));
   sel.value = m(f.family).category || '';
   sel.classList.toggle('auto', !sel.value);
 }
@@ -368,7 +436,7 @@ function buildCard(f) {
     const x = m(cur.family);
     nameEl.textContent = title(cur);
     nameEl.classList.toggle('renamed', !!x.title);
-    nameEl.title = `${title(cur)}${x.title ? ` (${cur.family})` : ''}\n${sourceLabel(cur)} · ${category(cur.family)}\nClick for details`;
+    nameEl.title = `${title(cur)}${cur.grouped ? ` (group of ${cur.members.size})` : ''}\n${category(cur.family)}\nClick for details`;
     hideBtn.textContent = x.hidden ? 'unhide' : 'hide';
     hideBtn.title = x.hidden ? 'Show in workspace' : 'Hide from workspace';
     card.classList.toggle('is-hidden', !!x.hidden);
@@ -380,7 +448,7 @@ function buildCard(f) {
   };
   const rebind = (nf) => {
     cur = nf; nf.card = card; nf.refresh = refresh; nf.rebind = rebind;
-    if (sample.style.fontFamily) sample.style.fontFamily = `"${ensureFace(rep(nf))}", sans-serif`;
+    if (sample.style.fontFamily) { sample.style.fontFamily = `"${ensureFace(rep(nf))}", sans-serif`; renderSample(sample, ui.text || ' ', rep(nf)); }
     refresh();
   };
   rebind(f);
@@ -416,7 +484,6 @@ function migrateMeta(oldFamily, path) {
 }
 
 function fileEditor(f, s, file) {
-  const where = { windows: 'installed for all users', user: 'installed by you', folder: 'in a folder', file: 'added file' }[file.source];
   const inputs = {
     file: el('input', { type: 'text', value: fileName(file.path), spellcheck: false }),
     1: el('input', { type: 'text', value: s.app || '', spellcheck: false }),
@@ -428,13 +495,13 @@ function fileEditor(f, s, file) {
   const saveBtn = el('button', { textContent: 'Save to file', className: 'primary-sm' });
   const field = (label, input, hint) => el('label', { className: 'frow' }, el('span', { textContent: label, title: hint }), input);
   const box = el('details', { className: 'fedit' },
-    el('summary', {}, el('b', { textContent: s.style }), ' — ', fileName(file.path), file.index ? ` (face ${file.index + 1})` : '', el('span', { className: 'muted', textContent: ` · ${where}` })),
+    el('summary', {}, fileName(file.path), file.index ? ` (face ${file.index + 1})` : '', el('span', { className: 'muted', textContent: ` · ${styleName(f, s)}` })),
     field('File name', inputs.file, 'Name of the file on disk'),
     field('In apps', inputs[1], 'Family name Word, GIMP etc. show (name ID 1)'),
     field('Full name', inputs[4], 'Full font name (name ID 4); also the name Windows lists'),
     field('PostScript', inputs[6], 'PostScript name (name ID 6): no spaces'),
     !editable ? el('p', { className: 'muted small', textContent: 'Web fonts (WOFF/WOFF2) can only be renamed on disk, not edited inside.' }) : null,
-    file.source === 'windows' ? el('p', { className: 'muted small', textContent: 'Fonts in C:\\Windows\\Fonts can only be changed when Typo runs as administrator.' }) : null,
+    file.source === 'windows' ? el('p', { className: 'muted small', textContent: 'Fonts in C:\\Windows\\Fonts can only be changed when Ytpo runs as administrator.' }) : null,
     el('p', { className: 'btn-row' }, saveBtn,
       el('button', { textContent: 'Show in Explorer', onclick: () => invoke('reveal', { path: file.path }) })),
   );
@@ -458,46 +525,73 @@ function fileEditor(f, s, file) {
   return box;
 }
 
-/** Expandable details: Typo label, real names (editable in the files), other-language names, files, styles. */
+/** Expandable details: variations, class, family (rename / group), files, tags, archive. */
 function toggleDetails(f) {
   const existing = f.card.querySelector('.details');
   if (existing) { existing.remove(); return; }
 
   const row = (label, ...content) => el('div', { className: 'row' }, el('span', { className: 'k', textContent: label }), el('div', { className: 'v' }, ...content));
-  const titleIn = el('input', { className: 'title-in', type: 'text', value: m(f.family).title || '', placeholder: f.family, spellcheck: false });
-  titleIn.onkeydown = (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); titleIn.blur(); }
-    else if (e.key === 'Escape') { titleIn.value = m(f.family).title || ''; titleIn.blur(); }
-  };
-  titleIn.onblur = () => {
-    if ((m(f.family).title || '') === titleIn.value.trim()) return;
-    setMeta(f.family, { title: titleIn.value });
-    f.refresh(); resort(); applyFilter();
-  };
+  const order = styleOrder(f);
+  const entries = f.styles.slice().sort(order).flatMap((s) => s.files.map((file) => [s, file]));
 
-  const entries = f.styles.slice().sort(styleOrder).flatMap((s) => s.files.map((file) => [s, file]));
-  const editableCount = entries.filter(([, x]) => x.editable).length;
-  const famIn = el('input', { type: 'text', value: f.family, spellcheck: false });
-  const famBtn = el('button', { textContent: `Rename in ${editableCount} file${editableCount === 1 ? '' : 's'}`, disabled: !editableCount });
-  famBtn.onclick = async () => {
-    const to = famIn.value.trim();
-    if (!to || to === f.family) return;
-    const targets = entries.filter(([, x]) => x.editable);
-    if (!confirm(`Rename the family "${f.family}" to "${to}" inside ${targets.length} font file(s)?\n\nThis updates the names apps show, the full names and the PostScript names, and removes names in other languages. A backup of each file is kept (Settings → Open backups).`)) return;
-    const jobs = targets.map(([, x]) => () => invoke('edit_names', { path: x.path, index: x.index, edit: { renameFamily: [f.family, to] } }));
-    if (await runEdits(`Renaming ${f.family}`, jobs)) migrateMeta(f.family, targets[0][1].path);
-  };
-
-  const alt = uniq(f.styles.flatMap((s) => s.alt));
+  // Variations
   const styles = el('div', { className: 'styles' });
-  for (const s of f.styles.slice().sort(styleOrder)) {
-    const r = el('div', {}, el('span', { textContent: s.style, title: s.full }), ui.text.slice(0, 60) || ' ');
+  for (const s of f.styles.slice().sort(order)) {
+    const txt = el('span', { className: 'txt' });
+    renderSample(txt, ui.text.slice(0, 60) || ' ', s);
+    const r = el('div', {}, el('span', { className: 'lbl', textContent: styleName(f, s), title: s.full }), txt);
     r.style.fontFamily = `"${ensureFace(s)}"`;
+    r._style = s;
     styles.append(r);
   }
 
+  // Class
   const sel = el('select', { className: 'cat', title: 'Classification' });
   sel.onchange = () => { setMeta(f.family, { category: sel.value || undefined }); syncCat(f); f.refresh(); renderSidebar(); applyFilter(); };
+
+  // Family: rename inside the files, or group / ungroup
+  const famBox = el('div', { className: 'fam' });
+  if (!f.grouped) {
+    const editableCount = entries.filter(([, x]) => x.editable).length;
+    const famIn = el('input', { type: 'text', value: f.family, spellcheck: false });
+    const famBtn = el('button', { textContent: `Rename in ${editableCount} file${editableCount === 1 ? '' : 's'}`, disabled: !editableCount });
+    famBtn.onclick = async () => {
+      const to = famIn.value.trim();
+      if (!to || to === f.family) return;
+      const targets = entries.filter(([, x]) => x.editable);
+      if (!confirm(`Rename the family "${f.family}" to "${to}" inside ${targets.length} font file(s)?\n\nThis updates the names apps show, the full names and the PostScript names, and removes names in other languages. A backup of each file is kept (Settings → Open backups).`)) return;
+      const jobs = targets.map(([s, x]) => () => invoke('edit_names', { path: x.path, index: x.index, edit: { renameFamily: [s.family, to] } }));
+      if (await runEdits(`Renaming ${f.family}`, jobs)) migrateMeta(f.family, targets[0][1].path);
+    };
+    famBox.append(el('div', { className: 'inline' }, famIn, famBtn));
+  } else {
+    famBox.append(el('div', { className: 'inline' },
+      el('span', { className: 'members', title: [...f.members].sort().join('\n'), textContent: [...f.members].sort().map((x) => x.toLowerCase().startsWith(f.family.toLowerCase() + ' ') ? x.slice(f.family.length + 1) : x).join(' · ') }),
+      el('button', { textContent: 'Ungroup', title: 'Show these families as separate cards again', onclick: () => ungroup(f) })));
+  }
+  const sugg = groupSuggestions(f);
+  const groupIn = el('input', { type: 'text', placeholder: f.grouped ? 'Rename group…' : 'Group under…', spellcheck: false, className: 'group-in' });
+  groupIn.setAttribute('list', 'groupList');
+  groupIn.onkeydown = (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const name = groupIn.value.trim();
+    if (!name || name === f.family) return;
+    groupInto(name, [f, fonts.get(name)].filter((g) => g && g !== undefined));
+  };
+  famBox.append(el('div', { className: 'btn-row sugg' },
+    ...sugg.map((g) => el('button', {
+      className: 'chip', title: `Group with: ${g.others.map((o) => o.family).join(', ')}`,
+      onclick: () => groupInto(g.name, [f, ...g.others]),
+    }, (f.grouped ? '+ ' : 'Group as ') + g.name, el('span', { className: 'n', textContent: f.grouped ? g.others.length : g.others.length + 1 }))),
+    groupIn));
+
+  // Files: collapsed, the first file name only
+  const filesBox = el('details', { className: 'filesbox' },
+    el('summary', {}, fileName(entries[0][1].path), entries.length > 1 ? el('span', { className: 'muted', textContent: ` + ${entries.length - 1} more` }) : null),
+    el('div', { className: 'fedits' }, ...entries.map(([s, x]) => fileEditor(f, s, x))));
+
+  // Tags
   const tagIn = el('input', { className: 'tag-in', placeholder: '+ tag', spellcheck: false });
   tagIn.setAttribute('list', 'tagList');
   const commit = () => {
@@ -515,33 +609,82 @@ function toggleDetails(f) {
   };
   tagIn.onblur = commit;
 
+  const alt = uniq(f.styles.flatMap((s) => s.alt));
   const box = el('div', { className: 'details' },
-    row('Tags', el('div', { className: 'tags' }, tagIn)),
-    row('Class', sel),
-    row('Source', sourceLabel(f)),
-    row('Label', titleIn, el('div', { className: 'muted small', textContent: 'Typo-only label; doesn\u2019t change the font. Empty = family name.' })),
-    row('Family', el('div', { className: 'inline' }, famIn, famBtn),
-      el('div', { className: 'muted small', textContent: 'Renames the font itself, in every file of this family. Backups are kept.' })),
-    alt.length ? row('Other names', alt.join(' · ')) : null,
-    row('Files', el('div', { className: 'fedits' }, ...entries.map(([s, x]) => fileEditor(f, s, x)))),
-    row('Archive', libraryActions(f)),
     styles,
+    row('Class', sel),
+    row(f.grouped ? 'Group' : 'Family', famBox),
+    alt.length ? row('Other names', alt.join(' · ')) : null,
+    row('Files', filesBox),
+    row('Tags', el('div', { className: 'tags' }, tagIn)),
+    libraryActions(f),
   );
   f.card.querySelector('.sample').after(box);
   syncCat(f);
   renderTags(f);
 }
 
-/** Archive / install / remove buttons for a family. */
+/** Prefixes of this family's name shared with other cards ("Franklin Gothic" for "Franklin Gothic Demi Cond"). */
+function groupSuggestions(f) {
+  const words = f.family.split(/\s+/);
+  const out = [];
+  for (let k = f.grouped ? words.length : words.length - 1; k >= 1 && out.length < 3; k--) {
+    const p = words.slice(0, k).join(' ');
+    if (p.replace(/\W/g, '').length < 3) continue;
+    const pl = p.toLowerCase();
+    const others = [...fonts.values()].filter((g) => g !== f && (g.family.toLowerCase() === pl || g.family.toLowerCase().startsWith(pl + ' ')));
+    if (others.length && !out.some((o) => o.others.length === others.length)) out.push({ name: p, others });
+  }
+  return out;
+}
+
+/** Puts cards (and everything already grouped in them) into one group card; their tags are merged. */
+function groupInto(name, cards) {
+  cards = uniq(cards);
+  const parts = cards.map((c) => m(c.family)).concat(meta[name] ? [meta[name]] : []);
+  const merged = {
+    tags: uniq(parts.flatMap((x) => x.tags || [])),
+    hidden: parts.length && parts.every((x) => x.hidden) || undefined,
+    category: parts.find((x) => x.category)?.category,
+  };
+  for (const c of cards) {
+    if (c.family !== name && !c.members.has(c.family)) delete meta[c.family];   // an old group's own entry
+    for (const fam of c.members) {
+      const e = clean(fam, { tags: [], group: name });
+      if (e) meta[fam] = e; else delete meta[fam];
+    }
+  }
+  const e = clean(name, { ...merged, group: undefined });
+  if (e) meta[name] = e; else delete meta[name];
+  persistMeta();
+  regroup();
+  const g = fonts.get(name);
+  if (g?.card && !g.card.querySelector('.details')) toggleDetails(g);
+  g?.card?.scrollIntoView({ block: 'nearest' });
+  status(`Grouped ${g ? g.members.size : ''} families as ${name}.`);
+}
+
+function ungroup(f) {
+  const x = m(f.family);
+  for (const fam of f.members) {
+    const e = clean(fam, { tags: [...x.tags], category: x.category, hidden: x.hidden });
+    if (e) meta[fam] = e; else delete meta[fam];
+  }
+  if (!f.members.has(f.family)) delete meta[f.family];
+  persistMeta();
+  regroup();
+  status(`Ungrouped ${f.family}.`);
+}
+
+/** Archive / unarchive (+ remove for added files) for a family. */
 function libraryActions(f) {
-  const box = el('div', { className: 'btn-row' });
-  if (!isArchived(f)) box.append(el('button', { textContent: 'Archive…', title: 'Copy to your archive folder, then uninstall / remove the original', onclick: () => archiveFamily(f) }));
-  if (sourcesOf(f).includes('archive') && !isInstalled(f)) box.append(el('button', { textContent: 'Install', title: 'Install from the archive for your account', onclick: () => installFamily(f) }));
-  if (sourcesOf(f).includes('file')) box.append(el('button', { textContent: 'Remove from Typo', title: 'Stop listing the added files (they stay on disk)', onclick: () => {
+  const box = el('div', { className: 'btn-row lib' });
+  if (sourcesOf(f).includes('archive') && !isInstalled(f)) box.append(el('button', { textContent: 'Unarchive', title: 'Install it again for your account (the archive copy is kept)', onclick: () => installFamily(f) }));
+  else box.append(el('button', { textContent: 'Archive', title: 'Copy to your archive folder, then uninstall / remove the original', onclick: () => archiveFamily(f) }));
+  if (sourcesOf(f).includes('file')) box.append(el('button', { textContent: 'Remove from Ytpo', title: 'Stop listing the added files (they stay on disk)', onclick: () => {
     const mine = new Set(f.styles.flatMap((s) => s.files.filter((x) => x.source === 'file').map((x) => x.path)));
     settings.files = settings.files.filter((p) => !mine.has(p)); saveSettings(); rescan();
   } }));
-  box.append(el('span', { className: 'muted small', textContent: settings.archive ? `Archive folder: ${settings.archive}` : 'Set an archive folder in Settings to use Archive.' }));
   return box;
 }
 
@@ -555,17 +698,9 @@ function filesToMove(f, pred) {
 }
 
 async function archiveFamily(f) {
-  if (!settings.archive) { alert('Choose an archive folder in Settings first.'); renderFolders(); $('#settings').showModal(); return; }
-  const { files, others } = filesToMove(f, (x) => x.source !== 'archive');
+  if (!settings.archive) { alert('Choose an archive folder in Settings first.'); renderFolders(); $('#settings').showModal(); $('#archivePath').focus(); return; }
+  const { files } = filesToMove(f, (x) => x.source !== 'archive');
   if (!files.length) return;
-  const n = (src) => files.filter((x) => x.source === src).length;
-  const steps = [`• Copy ${files.length} file${files.length > 1 ? 's' : ''} to ${settings.archive} (and check the copy)`];
-  if (n('user') || n('windows')) steps.push(`• Uninstall ${n('user') + n('windows')} file(s) from Windows and delete the installed copy`);
-  if (n('windows')) steps.push('  (fonts in C:\\Windows\\Fonts need Typo to run as administrator)');
-  if (n('folder')) steps.push(`• Delete the original from its font folder (${n('folder')} file(s))`);
-  if (n('file')) steps.push(`• Stop listing ${n('file')} added file(s) (the originals stay where they are)`);
-  if (others.length) steps.push(`\nThese files also contain: ${others.join(', ')}. They will be archived too.`);
-  if (!confirm(`Archive "${title(f)}"?\n\n${steps.join('\n')}\n\nTags and labels are kept, and you can reinstall it later (Show archived → Install).`)) return;
   const jobs = files.map((x) => async () => {
     const r = await invoke('archive_font', { path: x.path, source: x.source, archiveDir: settings.archive });
     if (x.source === 'file') { settings.files = settings.files.filter((p) => p !== x.path); saveSettings(); }
@@ -575,25 +710,28 @@ async function archiveFamily(f) {
 }
 
 async function installFamily(f) {
-  const { files, others } = filesToMove(f, (x) => x.source === 'archive');
+  const { files } = filesToMove(f, (x) => x.source === 'archive');
   if (!files.length) return;
-  if (!confirm(`Install "${title(f)}" for your Windows account from the archive?${others.length ? `\n\nThe same files also contain: ${others.join(', ')}.` : ''}\n\nThe archive copy is kept.`)) return;
-  await runEdits(`Installing ${title(f)}`, files.map((x) => () => invoke('install_font', { path: x.path })));
+  await runEdits(`Unarchiving ${title(f)}`, files.map((x) => () => invoke('install_font', { path: x.path })));
 }
 
-function styleOrder(a, b) {
-  const w = (s) => { const t = (s.style || '').toLowerCase().replace(/[\s-]/g, '');
-    const n = [['thin', 1], ['hairline', 1], ['extralight', 2], ['ultralight', 2], ['light', 3], ['regular', 4], ['book', 4], ['normal', 4], ['medium', 5], ['semibold', 6], ['demibold', 6], ['extrabold', 8], ['ultrabold', 8], ['bold', 7], ['black', 9], ['heavy', 9]]
+/** Sorts styles by width (normal before condensed / wide), then weight, then upright before italic. */
+function styleOrder(f) {
+  const key = (s) => {
+    const t = styleName(f, s).toLowerCase().replace(/[\s-]/g, '');
+    const w = [['thin', 1], ['hairline', 1], ['extralight', 2], ['ultralight', 2], ['light', 3], ['regular', 4], ['book', 4], ['normal', 4], ['medium', 5], ['semibold', 6], ['demibold', 6], ['extrabold', 8], ['ultrabold', 8], ['demi', 6], ['bold', 7], ['black', 9], ['heavy', 9]]
       .find(([k]) => t.includes(k));
-    return (n ? n[1] : 4) * 2 + (/italic|oblique/.test(t) ? 1 : 0); };
-  return w(a) - w(b) || (a.style || '').localeCompare(b.style || '');
+    const width = /compressed|condensed|cond\b|cond|narrow/.test(t) ? 1 : /extended|expanded|wide/.test(t) ? 2 : 0;
+    return width * 100 + (w ? w[1] : 4) * 2 + (/italic|oblique/.test(t) ? 1 : 0);
+  };
+  return (a, b) => key(a) - key(b) || styleName(f, a).localeCompare(styleName(f, b));
 }
 
 /* ------------------------------------------------------------ filtering */
 
 /** All the names a font can be found by: your label, family, app names, other-language names, file names. */
 function haystack(f) {
-  return [title(f), f.family, ...f.styles.flatMap((s) => [s.app, s.full, s.ps, ...s.alt, ...s.files.map((x) => x.path)])].join('\n').toLowerCase();
+  return [title(f), f.family, ...f.members, ...f.styles.flatMap((s) => [s.app, s.full, s.ps, ...s.alt, ...s.files.map((x) => x.path)])].join('\n').toLowerCase();
 }
 
 function visible(f) {
@@ -636,12 +774,15 @@ const toggler = (set, v) => () => { set.has(v) ? set.delete(v) : set.add(v); ren
 
 function renderSidebar() {
   const pool = [...fonts.values()].filter((f) => (ui.showHidden || !m(f.family).hidden) && (ui.showArchived || !isArchived(f)));
-  const catN = Object.fromEntries(CATS.map((c) => [c, 0]));
-  for (const f of pool) catN[category(f.family)]++;
-  $('#cats').replaceChildren(...CATS.map((c) => chip(c, catN[c], filter.cats.has(c), toggler(filter.cats, c))));
+  const catN = {};
+  for (const f of pool) { const c = category(f.family); catN[c] = (catN[c] || 0) + 1; }
+  // Listed classes nobody uses stay out of the way; classes used but not listed still show.
+  const shownCats = uniq([...CATS(), ...Object.keys(catN).sort()]).filter((c) => catN[c] || filter.cats.has(c));
+  $('#cats').replaceChildren(...shownCats.map((c) => chip(c, catN[c] || 0, filter.cats.has(c), toggler(filter.cats, c))));
 
   const srcN = {};
   for (const f of pool) for (const s of sourcesOf(f)) srcN[s] = (srcN[s] || 0) + 1;
+  $('#sourceSec').hidden = !settings.showSources;
   $('#sources').replaceChildren(...Object.keys(SOURCES).filter((s) => srcN[s] || filter.sources.has(s))
     .map((s) => chip(SOURCES[s], srcN[s] || 0, filter.sources.has(s), toggler(filter.sources, s))));
 
@@ -664,6 +805,8 @@ function renderSidebar() {
 function renderTagList() {
   const all = new Set(Object.values(meta).flatMap((x) => x.tags));
   $('#tagList').replaceChildren(...[...all].sort().map((t) => el('option', { value: t })));
+  const groups = uniq([...fonts.values()].filter((f) => f.grouped).map((f) => f.family)).sort();
+  $('#groupList').replaceChildren(...groups.map((g) => el('option', { value: g })));
 }
 
 function status(s) { $('#status').textContent = s; }
@@ -690,7 +833,6 @@ function renderFolders() {
     el('button', { textContent: 'Open', onclick: () => invoke('reveal', { path: p }) }),
     el('button', { textContent: 'Remove', onclick: () => { settings.folders = settings.folders.filter((x) => x !== p); saveSettings(); renderFolders(); rescan(); } }))));
   if (!settings.folders.length) $('#folderList').append(el('li', { className: 'muted small', textContent: 'No folders yet.' }));
-  $('#folderStatus').textContent = settings.folders.length ? `${settings.folders.length} folder${settings.folders.length > 1 ? 's' : ''}` : '';
   const errs = $('#scanErrors');
   errs.replaceChildren(...lastErrors.slice(0, 20).map((e) => el('li', { textContent: e })));
   errs.hidden = !lastErrors.length;
@@ -714,8 +856,8 @@ function setText(t) {
   ui.text = t;
   const shown = t || ' ';
   for (const f of fonts.values()) if (f.card) {
-    f.card.querySelector('.sample').textContent = shown;
-    f.card.querySelectorAll('.styles div').forEach((r) => { r.lastChild.textContent = shown.slice(0, 60); });
+    renderSample(f.card.querySelector('.sample'), shown, rep(f));
+    f.card.querySelectorAll('.styles > div').forEach((r) => renderSample(r.querySelector('.txt'), shown.slice(0, 60), r._style));
   }
   save(LS_UI, ui);
 }
@@ -737,8 +879,38 @@ $('#showArchived').onchange = (e) => { ui.showArchived = e.target.checked; save(
 $('#search').oninput = (e) => { filter.q = e.target.value.trim().toLowerCase(); applyFilter(); };
 $('#clearTags').onclick = () => { filter.tags.clear(); filter.cats.clear(); filter.sources.clear(); renderSidebar(); applyFilter(); };
 
-$('#addFolder').onclick = $('#emptyFolder').onclick = browseFolder;
-$('#rescan').onclick = () => rescan();
+/* -------------------------------------------------------- appearance & classes */
+
+function applyTheme() {
+  const r = document.documentElement;
+  if (settings.theme === 'light' || settings.theme === 'dark') r.dataset.theme = settings.theme; else delete r.dataset.theme;
+  r.style.setProperty('--accent', settings.accent || ACCENTS.Red);
+  for (const b of document.querySelectorAll('#themeSeg button')) b.classList.toggle('on', b.dataset.theme === (settings.theme || 'system'));
+  for (const b of document.querySelectorAll('#accents .sw')) b.classList.toggle('on', b.dataset.c.toLowerCase() === (settings.accent || '').toLowerCase());
+  $('#accentCustom').value = settings.accent || ACCENTS.Red;
+}
+for (const b of document.querySelectorAll('#themeSeg button')) b.onclick = () => { settings.theme = b.dataset.theme; saveSettings(); applyTheme(); };
+$('#accents').prepend(...Object.entries(ACCENTS).map(([n, c]) => {
+  const b = el('button', { className: 'sw', title: n });
+  b.dataset.c = c; b.style.background = c;
+  b.onclick = () => { settings.accent = c; saveSettings(); applyTheme(); };
+  return b;
+}));
+$('#accentCustom').oninput = (e) => { settings.accent = e.target.value; saveSettings(); applyTheme(); };
+
+function renderCatsSetting() { $('#catList').value = CATS().join('\n'); }
+$('#catList').onchange = () => {
+  const list = uniq($('#catList').value.split(/\r?\n/).map((x) => x.trim()));
+  settings.cats = list.length ? list : DEFAULT_CATS.slice();
+  saveSettings(); renderCatsSetting();
+  for (const f of fonts.values()) syncCat(f);
+  renderSidebar(); applyFilter();
+};
+$('#catReset').onclick = () => { settings.cats = DEFAULT_CATS.slice(); saveSettings(); renderCatsSetting(); for (const f of fonts.values()) syncCat(f); renderSidebar(); };
+$('#setSources').checked = !!settings.showSources;
+$('#setSources').onchange = (e) => { settings.showSources = e.target.checked; if (!settings.showSources) filter.sources.clear(); saveSettings(); renderSidebar(); applyFilter(); };
+
+$('#emptyFolder').onclick = browseFolder;
 $('#addFiles').onclick = async () => {
   const picked = await T.dialog.open({ multiple: true, title: 'Add font files', filters: [{ name: 'Fonts', extensions: FONT_EXT }] });
   if (picked?.length) addPaths([].concat(picked));
@@ -759,7 +931,7 @@ $('#linkMd').onclick = () => linkFile(true);
 $('#newMd').onclick = () => linkFile(false);
 
 // Settings dialog
-$('#openSettings').onclick = () => { renderFolders(); $('#settings').showModal(); };
+$('#openSettings').onclick = () => { renderFolders(); renderCatsSetting(); $('#settings').showModal(); };
 $('#setInstalled').checked = settings.installed;
 $('#setWatch').checked = settings.watch;
 $(settings.exportAll ? '#scopeAll' : '#scopeAnn').checked = true;
@@ -783,10 +955,10 @@ $('#archiveBrowse').onclick = async () => { const p = await T.dialog.open({ dire
 $('#openBackups').onclick = () => invoke('open_backups');
 $('#rescan2').onclick = () => rescan();
 $('#resetMeta').onclick = () => {
-  if (!confirm('Clear every label, tag, classification override and hidden flag? A linked .md file will be emptied too.')) return;
+  if (!confirm('Clear every tag, group, classification override and hidden flag? A linked .md file will be emptied too.')) return;
   meta = {}; persistMeta();
+  regroup();
   for (const f of fonts.values()) f.refresh?.();
-  rebuild();
 };
 
 document.addEventListener('keydown', (e) => {
@@ -823,6 +995,7 @@ T.webview.getCurrentWebview().onDragDropEvent((e) => {
 /* -------------------------------------------------------------------- boot */
 
 (async function boot() {
+  applyTheme();
   applyUI();
   renderFolders();
   // A linked .md file is the source of truth: read it before anything can write to it.

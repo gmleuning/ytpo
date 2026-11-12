@@ -1,5 +1,5 @@
 //! Minimal sfnt (TrueType/OpenType/TTC/WOFF) reader and name-table writer.
-//! Reads only what Typo needs: names, OS/2 + post bits for classification.
+//! Reads only what Ytpo needs: names, OS/2 + post bits for classification.
 //! Writes: a rebuilt font file with a replaced `name` table (valid checksums, DSIG dropped).
 
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,7 @@ pub type Tag = [u8; 4];
 #[serde(rename_all = "camelCase")]
 pub struct FaceMeta {
     pub index: u32,
-    /// Typographic family (name ID 16, else 1) — what Typo groups by.
+    /// Typographic family (name ID 16, else 1) — what Ytpo groups by.
     pub family: String,
     pub style: String,
     pub full: String,
@@ -25,6 +25,9 @@ pub struct FaceMeta {
     pub cat: Option<String>,
     /// Plain sfnt (ttf/otf/ttc) — WOFF/WOFF2 can't be rewritten.
     pub editable: bool,
+    /// Characters the font really has, as sorted inclusive [start, end] ranges. Empty = unknown.
+    #[serde(default)]
+    pub cmap: Vec<[u32; 2]>,
 }
 
 pub fn be16(d: &[u8], o: usize) -> u16 {
@@ -233,6 +236,87 @@ pub fn classify(f: &FontRef, family: &str) -> Option<&'static str> {
     None
 }
 
+/// Codepoints mapped to a real glyph, as merged ranges. Symbol fonts (3,0) map their glyphs
+/// at U+F0xx, and Windows shows them for the matching 0x20–0xFF characters, so both are included.
+pub fn coverage(t: &[u8]) -> (Vec<[u32; 2]>, bool) {
+    let n = be16(t, 2) as usize;
+    let mut subs: Vec<(u16, u16, usize)> = Vec::new();
+    for i in 0..n {
+        let p = 4 + 8 * i;
+        if p + 8 > t.len() { break; }
+        subs.push((be16(t, p), be16(t, p + 2), be32(t, p + 4) as usize));
+    }
+    let rank = |pl: u16, en: u16, fmt: u16| -> i32 {
+        let base = match (pl, en) { (3, 10) => 50, (0, 4) | (0, 6) => 45, (3, 1) => 40, (0, _) => 35, (3, 0) => 30, _ => return -1 };
+        base + if fmt == 12 || fmt == 13 { 5 } else if fmt == 4 { 2 } else { 0 }
+    };
+    let Some(&(pl, en, off)) = subs.iter().filter(|s| t.len() > s.2 + 2).max_by_key(|s| rank(s.0, s.1, be16(t, s.2))) else { return (Vec::new(), false) };
+    if rank(pl, en, be16(t, off)) < 0 { return (Vec::new(), false); }
+    let symbol = pl == 3 && en == 0;
+    let mut r: Vec<[u32; 2]> = Vec::new();
+    let mut push = |a: u32, b: u32| {
+        if let Some(l) = r.last_mut() { if a <= l[1] + 1 && a >= l[0] { l[1] = l[1].max(b); return; } }
+        r.push([a, b]);
+    };
+    let st = &t[off..];
+    match be16(st, 0) {
+        0 => for c in 0..256u32 { if st.get(6 + c as usize).is_some_and(|&g| g != 0) { push(c, c); } },
+        4 => {
+            let seg = be16(st, 6) as usize / 2;
+            let (ends, starts, deltas, ro) = (14, 16 + 2 * seg, 16 + 4 * seg, 16 + 6 * seg);
+            for i in 0..seg {
+                let (a, b) = (be16(st, starts + 2 * i) as u32, be16(st, ends + 2 * i) as u32);
+                if a > b || a == 0xFFFF { continue; }
+                let delta = be16(st, deltas + 2 * i);
+                let rof = be16(st, ro + 2 * i) as usize;
+                let mut run: Option<u32> = None;
+                for c in a..=b {
+                    let g = if rof == 0 { (c as u16).wrapping_add(delta) } else {
+                        let gi = be16(st, ro + 2 * i + rof + 2 * (c - a) as usize);
+                        if gi == 0 { 0 } else { gi.wrapping_add(delta) }
+                    };
+                    match (g != 0, run) {
+                        (true, None) => run = Some(c),
+                        (false, Some(s0)) => { push(s0, c - 1); run = None; }
+                        _ => {}
+                    }
+                }
+                if let Some(s0) = run { push(s0, b); }
+            }
+        }
+        6 => {
+            let (first, cnt) = (be16(st, 6) as u32, be16(st, 8) as u32);
+            for k in 0..cnt { if be16(st, 10 + 2 * k as usize) != 0 { push(first + k, first + k); } }
+        }
+        12 | 13 => {
+            let fmt = be16(st, 0);
+            let groups = be32(st, 12) as usize;
+            for k in 0..groups.min(200_000) {
+                let p = 16 + 12 * k;
+                if p + 12 > st.len() { break; }
+                let (a, b, g) = (be32(st, p), be32(st, p + 4), be32(st, p + 8));
+                if a > b || b > 0x10FFFF { continue; }
+                if fmt == 13 && g == 0 { continue; }
+                if fmt == 12 && g == 0 { if a < b { push(a + 1, b); } continue; }
+                push(a, b);
+            }
+        }
+        _ => return (Vec::new(), false),
+    }
+    r.sort_by_key(|x| x[0]);
+    if symbol {
+        let low: Vec<[u32; 2]> = r.iter().filter(|x| x[1] >= 0xF020 && x[0] <= 0xF0FF)
+            .map(|x| [x[0].max(0xF020) - 0xF000, x[1].min(0xF0FF) - 0xF000]).collect();
+        r.extend(low);
+        r.sort_by_key(|x| x[0]);
+    }
+    let mut merged: Vec<[u32; 2]> = Vec::new();
+    for x in r {
+        match merged.last_mut() { Some(l) if x[0] <= l[1] + 1 => l[1] = l[1].max(x[1]), _ => merged.push(x) }
+    }
+    (merged, symbol)
+}
+
 fn junk(s: &str) -> bool { !s.chars().any(|c| c.is_alphanumeric()) }
 
 /// Metadata for every face in a font file. Never fails: unreadable files get a filename-based entry.
@@ -264,6 +348,11 @@ pub fn inspect(d: &[u8], fallback: &str) -> Vec<FaceMeta> {
             m.alt = alt;
         }
         m.cat = classify(&f, &m.family).map(str::to_string);
+        if let Some(t) = f.get(b"cmap") {
+            let (cov, symbol) = coverage(&t);
+            if symbol { m.cat = Some("Symbol".into()); }
+            m.cmap = cov;
+        }
         out.push(m);
     }
     if out.is_empty() { out.push(plain()); }

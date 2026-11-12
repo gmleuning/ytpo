@@ -1,4 +1,4 @@
-// Typo — minimal local-first font browser (Tauri shell around the ui/ folder).
+// Ytpo — minimal local-first font browser (Tauri shell around the ui/ folder).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod archive;
@@ -24,7 +24,7 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Res<T> + Send + 'static
 
 #[tauri::command]
 async fn scan_fonts(app: tauri::AppHandle, folders: Vec<String>, files: Vec<String>, installed: bool, archive: Option<String>) -> Res<scan::ScanResult> {
-    let cache = data_dir(&app)?.join("scan-cache-v2.json");
+    let cache = data_dir(&app)?.join("scan-cache-v3.json");
     blocking(move || Ok(scan::scan(&folders, &files, installed, archive.as_deref(), &cache))).await
 }
 
@@ -109,5 +109,5 @@ fn main() {
             scan_fonts, edit_names, rename_file, archive_font, install_font, read_text, write_text, file_mtime, is_dir, reveal, open_backups, windows_fonts_dir
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Typo");
+        .expect("error while running Ytpo");
 }

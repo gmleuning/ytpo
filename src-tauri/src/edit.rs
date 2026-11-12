@@ -21,7 +21,7 @@ pub struct NameEdit {
 fn friendly(e: std::io::Error, path: &Path) -> String {
     match e.kind() {
         std::io::ErrorKind::PermissionDenied if path.starts_with(winfonts::fonts_dir()) || path.to_string_lossy().to_lowercase().starts_with(&winfonts::fonts_dir().to_string_lossy().to_lowercase()) =>
-            "This font is installed for all users in C:\\Windows\\Fonts, which only an administrator can change. Run Typo as administrator to edit it.".into(),
+            "This font is installed for all users in C:\\Windows\\Fonts, which only an administrator can change. Run Ytpo as administrator to edit it.".into(),
         std::io::ErrorKind::PermissionDenied => format!("Access denied: {} (is it read-only or open in another app?)", path.display()),
         _ => format!("{}: {}", path.display(), e),
     }
@@ -215,5 +215,20 @@ mod tests {
         assert!(np.ends_with("ConsoleTest.ttf"));
         assert!(Path::new(&np).exists() && !p.exists());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn coverage_reads_cmap() {
+        let has = |r: &[[u32; 2]], c: u32| r.iter().any(|x| x[0] <= c && c <= x[1]);
+        let Some(d) = font("arial.ttf") else { return };
+        let m = &crate::sfnt::inspect(&d, "x")[0];
+        assert!(has(&m.cmap, 'A' as u32) && has(&m.cmap, '€' as u32));
+        assert!(!has(&m.cmap, 0xAC00));
+        if let Some(d) = font("malgun.ttf") { assert!(has(&crate::sfnt::inspect(&d, "x")[0].cmap, 0xAC00)); }
+        if let Some(d) = font("wingding.ttf") {
+            let m = &crate::sfnt::inspect(&d, "x")[0];
+            assert_eq!(m.cat.as_deref(), Some("Symbol"));
+            assert!(has(&m.cmap, 'J' as u32));
+        }
     }
 }

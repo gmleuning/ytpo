@@ -100,7 +100,7 @@ pub fn user_fonts_dir() -> PathBuf {
 fn writable(source: &str) -> Result<RegKey, String> {
     hive(source).open_subkey_with_flags(KEY, KEY_READ | KEY_WRITE).map_err(|_| {
         if source == "user" { "Couldn't open your font registry key.".to_string() }
-        else { "This font is installed for all users; uninstalling it needs Typo to run as administrator.".to_string() }
+        else { "This font is installed for all users; uninstalling it needs Ytpo to run as administrator.".to_string() }
     })
 }
 

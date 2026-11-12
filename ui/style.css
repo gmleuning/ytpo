@@ -1,28 +1,29 @@
 :root {
+  --brand: #d62d2d;
   --bg: #fafaf9;
   --panel: #ffffff;
   --ink: #1c1b1a;
   --muted: #7a7672;
   --line: #e7e4e0;
   --chip: #f1efec;
-  --accent: #d9480f;
+  --accent: #d62d2d;
   --accent-ink: #ffffff;
   --size: 48px;
   --track: 0em;
   color-scheme: light dark;
 }
+/* Theme: follows Windows unless Settings → Appearance picks Light or Dark. The accent is set from Settings. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #141413;
-    --panel: #1c1c1a;
-    --ink: #ecebe8;
-    --muted: #8f8b86;
-    --line: #2d2c29;
-    --chip: #262522;
-    --accent: #ff7a3d;
-    --accent-ink: #141413;
+  :root:not([data-theme="light"]) {
+    --bg: #141413; --panel: #1c1c1a; --ink: #ecebe8; --muted: #8f8b86; --line: #2d2c29; --chip: #262522;
+    color-scheme: dark;
   }
 }
+:root[data-theme="dark"] {
+  --bg: #141413; --panel: #1c1c1a; --ink: #ecebe8; --muted: #8f8b86; --line: #2d2c29; --chip: #262522;
+  color-scheme: dark;
+}
+:root[data-theme="light"] { color-scheme: light; }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -64,7 +65,10 @@ code { background: var(--chip); padding: 1px 4px; border-radius: 4px; }
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
-.brand { font-weight: 700; letter-spacing: .02em; }
+.brand {
+  background: var(--brand); color: #fff; font-weight: 700; letter-spacing: .02em;
+  padding: 3px 9px 4px; border-radius: 6px; line-height: 1.2;
+}
 .sample-input { flex: 1 1 280px; font-size: 15px; padding: 8px 10px; }
 #preset { max-width: 120px; }
 .ctl { display: flex; flex-direction: column; font-size: 11px; color: var(--muted); min-width: 120px; }
@@ -146,8 +150,11 @@ main { flex: 1; overflow-y: auto; padding: 16px; }
   overflow: hidden;
 }
 .styles { display: flex; flex-direction: column; gap: 4px; border-top: 1px dashed var(--line); padding-top: 8px; }
-.styles div { display: flex; gap: 10px; align-items: baseline; font-size: 22px; letter-spacing: var(--track); white-space: nowrap; overflow: hidden; }
-.styles span { font: 11px system-ui, sans-serif; color: var(--muted); width: 110px; flex: none; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0; }
+.styles > div { display: flex; gap: 10px; align-items: baseline; font-size: 22px; letter-spacing: var(--track); white-space: nowrap; overflow: hidden; }
+.styles .lbl { font: 11px system-ui, sans-serif; color: var(--muted); width: 120px; flex: none; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0; }
+.styles .txt { overflow: hidden; text-overflow: ellipsis; }
+/* Characters the font doesn't have (drawn by a fallback font) */
+.miss { opacity: .3; }
 .tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .tag {
   background: var(--chip); border-radius: 4px; padding: 1px 6px; font-size: 11px;
@@ -241,3 +248,25 @@ button:disabled { opacity: .5; cursor: default; }
 .errors { margin: 0; padding-left: 16px; color: var(--accent); max-height: 120px; overflow-y: auto; }
 .folder-list .fname { font-weight: 400; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
 dialog { width: min(640px, calc(100vw - 32px)); }
+
+/* ---------- v0.4 ---------- */
+.details .styles { border-top: 0; padding-top: 0; padding-bottom: 4px; border-bottom: 1px dashed var(--line); }
+.details .fam { display: flex; flex-direction: column; gap: 6px; }
+.details .members { flex: 1; color: var(--muted); font-size: 11px; }
+.details .sugg { align-items: center; }
+.details .sugg .chip { font-size: 11px; }
+.details .group-in { padding: 2px 6px; font-size: 11px; width: 130px; }
+.filesbox > summary { cursor: pointer; font: 11px ui-monospace, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filesbox[open] > summary { margin-bottom: 6px; }
+.details .lib { padding-top: 4px; }
+textarea {
+  font: 12px/1.5 ui-monospace, Consolas, monospace; color: inherit;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; resize: vertical; outline: none;
+}
+textarea:focus { border-color: var(--accent); }
+dialog .lab { width: 60px; color: var(--muted); font-size: 12px; }
+.swatches { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.swatches .sw { width: 22px; height: 22px; border-radius: 50%; padding: 0; border: 2px solid transparent; }
+.swatches .sw.on { border-color: var(--ink); box-shadow: inset 0 0 0 2px var(--panel); }
+.swatches input[type=color] { width: 28px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; }
+.side section[hidden], [hidden] { display: none !important; }

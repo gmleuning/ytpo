@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Typo</title>
+  <title>Ytpo</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="tester">
-    <div class="brand">Typo</div>
+    <div class="brand" title="Ytpo (say: typo)">Ytpo</div>
     <input id="sample" class="sample-input" type="text" spellcheck="false"
            placeholder="Type to preview…" value="The quick brown fox jumps over the lazy dog">
     <select id="preset" title="Sample presets">
@@ -22,6 +22,8 @@
       <option>Aa Gg Rr Qq 1Il0O</option>
       <option>다람쥐 헌 쳇바퀴에 타고파</option>
       <option>いろはにほへと ちりぬるを</option>
+      <option title="Less common symbols">€ £ ¥ ¢ © ® ™ § ¶ † ‡ ° ± × ÷ ≈ ≠ ≤ ≥ ∞ ½ ¼ ¾ → ← ↑ ↓ • … № ‹ ›</option>
+      <option title="Rare symbols many fonts lack">₹ ₽ ₺ ₩ ₿ ‽ ⁂ ※ ⅓ ⅔ ⅛ ↔ ⇒ ⇔ ∑ ∏ ∫ ∂ ∆ √ ✓ ✗ ★ ☆ ♠ ♣ ♥ ♦ ♪ ⌘ ⌥ ⏎ ① ② ③</option>
     </select>
     <label class="ctl" title="Font size">
       <span>Size <output id="sizeOut">48</output></span>
@@ -48,7 +50,7 @@
         <div id="cats" class="chips"></div>
       </section>
 
-      <section>
+      <section id="sourceSec" hidden>
         <h3>Source</h3>
         <div id="sources" class="chips"></div>
       </section>
@@ -61,23 +63,6 @@
       <section>
         <label class="check"><input id="showHidden" type="checkbox"> Show hidden <span id="hiddenCount" class="muted"></span></label>
         <label class="check" id="archivedRow"><input id="showArchived" type="checkbox"> Show archived <span id="archivedCount" class="muted"></span></label>
-      </section>
-
-      <section class="actions">
-        <h3>Library</h3>
-        <button id="addFolder">Add font folder…</button>
-        <div id="folderStatus" class="muted small"></div>
-        <button id="addFiles">Add font files…</button>
-        <button id="rescan" title="Look for new or changed font files (F5)">Rescan</button>
-      </section>
-
-      <section class="actions">
-        <h3>Taxonomy (.md)</h3>
-        <button id="exportMd">Export .md</button>
-        <button id="importMd">Import .md…</button>
-        <button id="linkMd" title="Pick an existing .md file; it is loaded, then kept in sync both ways">Link existing .md…</button>
-        <button id="newMd" title="Create a new .md file from the current taxonomy and keep it in sync">Link new .md…</button>
-        <div id="linkStatus" class="muted small"></div>
       </section>
 
       <p id="status" class="muted small"></p>
@@ -97,16 +82,39 @@
     <form method="dialog" class="dlg-head"><h2>Settings</h2><button>Close</button></form>
 
     <section>
+      <h3>Appearance</h3>
+      <div class="inline"><span class="lab">Theme</span>
+        <div class="seg" id="themeSeg"><button data-theme="system">System</button><button data-theme="light">Light</button><button data-theme="dark">Dark</button></div>
+      </div>
+      <div class="inline"><span class="lab">Accent</span>
+        <div id="accents" class="swatches"><input id="accentCustom" type="color" title="Custom accent colour"></div>
+      </div>
+    </section>
+
+    <section>
+      <h3>Classifications</h3>
+      <p class="muted small">One per line, in the order the sidebar shows them. A class only appears in the sidebar once a font has it.</p>
+      <textarea id="catList" rows="9" spellcheck="false"></textarea>
+      <p><button id="catReset" class="link">Reset to defaults</button></p>
+    </section>
+
+    <section>
+      <h3>Sidebar</h3>
+      <label class="check"><input id="setSources" type="checkbox"> Show the Source filter (Windows, installed by you, folders, archive)</label>
+    </section>
+
+    <section>
       <h3>Font folders</h3>
       <p class="muted small">Every font file in these folders (and their subfolders) is shown. Nothing is copied, moved or installed. Type or paste any path, including hidden or system folders.</p>
       <ul id="folderList" class="folder-list"></ul>
       <p class="inline"><input id="folderPath" type="text" spellcheck="false" placeholder="e.g. D:\Fonts or C:\Windows\Fonts"> <button id="folderAdd">Add</button> <button id="folderBrowse">Browse…</button></p>
+      <p class="btn-row"><button id="addFiles">Add font files…</button> <button id="rescan2" title="Look for new or changed font files (F5)">Rescan</button></p>
       <ul id="scanErrors" class="errors small" hidden></ul>
     </section>
 
     <section>
       <h3>Archive folder</h3>
-      <p class="muted small"><b>Archive…</b> on a font copies its files here, checks the copy, then uninstalls it (or deletes it from its font folder). Archived fonts are hidden unless you tick <i>Show archived</i>, and can be reinstalled from there.</p>
+      <p class="muted small"><b>Archive</b> on a font copies its files here, checks the copy, then uninstalls it (or deletes it from its font folder). Archived fonts are hidden unless you tick <i>Show archived</i>; <b>Unarchive</b> installs them again.</p>
       <p class="inline"><input id="archivePath" type="text" spellcheck="false" placeholder="e.g. I:\My Drive\Archive\Fonts"> <button id="archiveBrowse">Browse…</button></p>
     </section>
 
@@ -117,22 +125,29 @@
 
     <section>
       <h3>Markdown taxonomy</h3>
+      <p class="btn-row">
+        <button id="linkMd" title="Pick an existing .md file; it is loaded, then kept in sync both ways">Link existing .md…</button>
+        <button id="newMd" title="Create a new .md file from the current taxonomy and keep it in sync">Link new .md…</button>
+        <button id="importMd">Import once…</button>
+        <button id="exportMd">Export…</button>
+      </p>
+      <div id="linkStatus" class="muted small"></div>
       <label class="check"><input id="scopeAll" type="radio" name="scope"> Export every loaded font</label>
-      <label class="check"><input id="scopeAnn" type="radio" name="scope"> Export only fonts with a title, tags, category override or hidden</label>
+      <label class="check"><input id="scopeAnn" type="radio" name="scope"> Export only fonts with tags, a group, a class override or hidden</label>
       <label class="check"><input id="setWatch" type="checkbox"> Reload the linked .md automatically when it is edited elsewhere</label>
     </section>
 
     <section>
       <h3>Data</h3>
       <p class="btn-row">
-        <button id="rescan2">Rescan fonts</button>
-        <button id="openBackups" title="Every font file Typo edits is backed up here first">Open backups folder</button>
-        <button id="resetMeta">Clear all tags &amp; labels…</button>
+        <button id="openBackups" title="Every font file Ytpo edits is backed up here first">Open backups folder</button>
+        <button id="resetMeta">Clear all tags &amp; groups…</button>
       </p>
     </section>
   </dialog>
 
   <datalist id="tagList"></datalist>
+  <datalist id="groupList"></datalist>
   <div id="drop" class="drop">Drop fonts or a .md taxonomy</div>
   <script src="app.js"></script>
 </body>
